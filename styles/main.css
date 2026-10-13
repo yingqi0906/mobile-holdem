@@ -733,7 +733,7 @@ body {
   flex-direction: column;
   width: min(340px, 100%);
   max-height: calc(100% - 8px);
-  padding: 20px 18px 16px;
+  padding: 18px 16px 14px;
   border-radius: 20px;
   text-align: center;
   background: linear-gradient(#122a1c, #071410);
@@ -790,7 +790,7 @@ body {
   justify-content: center;
   gap: 8px;
   margin: 4px 0 0;
-  font-size: 38px;
+  font-size: 34px;
   font-weight: 900;
   line-height: 1.1;
   font-variant-numeric: tabular-nums;
@@ -813,12 +813,29 @@ body {
   height: 20px;
 }
 
-.result-hand {
-  margin-top: 14px;
-  padding: 12px 10px;
+.result-block {
+  margin-top: 12px;
+  padding: 10px 10px 11px;
   border-radius: 12px;
   background: rgba(0, 0, 0, 0.3);
   border: 1px solid var(--line);
+}
+
+.block-label {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+}
+
+.block-caption {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--gold);
+}
+
+.result-block .result-cards {
+  margin-top: 9px;
 }
 
 /* 摊牌列表：每个人一行，底牌 + 名字 + 牌型 + 这一手的盈亏 */
@@ -827,7 +844,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 5px;
-  margin: 14px 0 0;
+  margin: 12px 0 0;
   padding: 0;
   list-style: none;
 }
@@ -903,13 +920,6 @@ body {
   color: #7ce0a7;
 }
 
-.result-hand-name {
-  margin-bottom: 9px;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--gold);
-}
-
 .result-cards {
   display: flex;
   justify-content: center;
@@ -958,7 +968,7 @@ body {
 .result-next {
   flex: none;
   width: 100%;
-  margin-top: 16px;
+  margin-top: 12px;
 }
 
 /* 赢家座位上飘出的筹码数字 */

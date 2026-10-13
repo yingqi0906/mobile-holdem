@@ -21,7 +21,7 @@ import { bestFive } from '../core/evaluator.js';
 import { createCryptoRng } from '../core/rng.js';
 
 /** 每次发布时改一下这个号，界面上能看到，方便确认自己加载的是哪一版。 */
-const BUILD = 'v0.6';
+const BUILD = 'v0.7';
 
 const CONFIG = {
   smallBlind: 10,
@@ -582,6 +582,11 @@ function showResult() {
     el('div', 'result-sub', result.type === 'fold' ? '其他人都弃牌' : '按牌型大小分配彩池')
   );
 
+  // 公共牌：所有人共用的信息，先摆出来，否则光看底牌不知道牌型是怎么来的
+  if (state.board.length) {
+    body.appendChild(resultBlock('公共牌', state.board));
+  }
+
   if (result.shown?.length) {
     // 摊牌：把每个亮牌玩家的底牌和牌型都列出来，按牌力从强到弱排。
     // 只显示赢家不够 —— 你更想知道自己和对手差在哪。
@@ -603,24 +608,19 @@ function showResult() {
     }
     body.appendChild(list);
 
-    // 赢家的牌到底是哪五张凑出来的，单独再亮一次
+    // 赢家的牌到底是哪五张凑出来的，单独再亮一次，并且标上牌型
     const champ = result.winners.find((w) => shownOf(w.seat));
     if (champ) {
-      const block = el('div', 'result-hand');
-      block.appendChild(
-        el(
-          'div',
-          'result-hand-name',
-          `${champ.seat === hero.index ? '你' : state.seats[champ.seat].name}的最佳五张`
+      const seat = state.seats[champ.seat];
+      const who = champ.seat === hero.index ? '你' : seat.name;
+      const info = shownOf(champ.seat);
+      body.appendChild(
+        resultBlock(
+          '最佳五张',
+          bestFive([...seat.hole, ...state.board]),
+          `${who} · ${info.description}`
         )
       );
-      const cards = el('div', 'result-cards');
-      const seat = state.seats[champ.seat];
-      for (const card of bestFive([...seat.hole, ...state.board])) {
-        cards.appendChild(cardEl(card));
-      }
-      block.appendChild(cards);
-      body.appendChild(block);
     }
   } else {
     // 弃牌结束：没人亮牌，只需要说清谁拿走了底池
@@ -656,6 +656,20 @@ function showWinDelta(seatIdx, amount) {
   node.style.setProperty('--y', `${pos.y}%`);
   els.chipLayer.appendChild(node);
   setTimeout(() => node.remove(), 1800);
+}
+
+/**
+ * 结算面板里的一个分节：小标题 +（可选说明）+ 一排牌。
+ * 公共牌和最佳五张都用它，保证两处的排版完全一致。
+ */
+function resultBlock(label, cards, caption) {
+  const box = el('div', 'result-block');
+  box.appendChild(el('div', 'block-label', label));
+  if (caption) box.appendChild(el('div', 'block-caption', caption));
+  const row = el('div', 'result-cards');
+  for (const card of cards) row.appendChild(cardEl(card));
+  box.appendChild(row);
+  return box;
 }
 
 function hideOverlay() {

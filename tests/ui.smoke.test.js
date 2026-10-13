@@ -319,10 +319,25 @@ test('结算面板会亮出赢家的最佳五张牌', () => {
   const sheet = overlay.children[0];
   assert.ok(sheet.classList.contains('result-sheet'), '应该是底部升起的结算面板');
 
-  // 面板里应该有一组 5 张牌的展示区
-  const cardsRow = findFirst(sheet, (n) => n.classList.contains('result-cards'));
-  assert.ok(cardsRow, '应该有亮牌区域');
-  assert.equal(cardsRow.children.length, 5, '应该亮出最佳五张');
+  // 公共牌和最佳五张都要摆出来，各 5 张
+  const cardRows = findAll(sheet, (n) => n.classList.contains('result-cards'));
+  assert.equal(cardRows.length, 2, '应该同时有「公共牌」和「最佳五张」两块');
+  for (const row of cardRows) {
+    assert.equal(row.children.length, 5, '每块都应该是 5 张');
+  }
+  const labels = findAll(sheet, (n) => n.classList.contains('block-label')).map(
+    (n) => n.textContent
+  );
+  assert.deepEqual(labels, ['公共牌', '最佳五张']);
+
+  // 最佳五张必须标明牌型，否则光看五张牌不知道强在哪
+  const captions = findAll(sheet, (n) => n.classList.contains('block-caption'));
+  assert.equal(captions.length, 1, '最佳五张应该有牌型说明');
+  const descriptions = debug.getState().result.shown.map((s) => s.description);
+  assert.ok(
+    descriptions.some((d) => captions[0].textContent.includes(d)),
+    `说明里应该带上赢家的牌型（${descriptions.join(' / ')}），实际：${captions[0].textContent}`
+  );
 
   const next = sheet.findButtons().find((b) => b.textContent.includes('下一手'));
   assert.ok(next, '应该有下一手按钮');
@@ -354,6 +369,13 @@ function findFirst(node, predicate) {
     if (hit) return hit;
   }
   return null;
+}
+
+/** 在 DOM 桩里收集所有符合条件的元素。 */
+function findAll(node, predicate, out = []) {
+  if (predicate(node)) out.push(node);
+  for (const child of node.children) findAll(child, predicate, out);
+  return out;
 }
 
 test('翻牌前的快捷加注按钮按大盲计', () => {
