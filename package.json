@@ -1,0 +1,16 @@
+{
+  "name": "mobile-holdem",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "手机网页版单机德州扑克（6 人桌，无限注，固定盲注）",
+  "scripts": {
+    "test": "node --test",
+    "serve": "node tools/serve.js",
+    "sim": "node tools/sim.js",
+    "share": "powershell -ExecutionPolicy Bypass -File tools/share.ps1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

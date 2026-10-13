@@ -1,0 +1,255 @@
+/**
+ * 电脑对手。
+ *
+ * 思路刻意保持"够用且好懂"：
+ *   1. 用蒙特卡洛模拟估算自己这手牌对抗当前对手数的胜率（equity）。
+ *   2. 和底池赔率比较，再叠加一个性格参数（松紧 / 激进度 / 诈唬频率）。
+ *
+ * 没有上 CFR 那种求解器 —— 那是研究项目，不是第一版该做的事。
+ */
+
+import { freshDeck, rankOf, suitOf } from './cards.js';
+import { evaluateBest } from './evaluator.js';
+import { ACTION_TYPES, PHASES, getLegalActions, totalPot } from './engine.js';
+import { createSeededRng } from './rng.js';
+
+export const BOT_PRESETS = {
+  rock: { name: '岩石', tightness: 0.85, aggression: 0.3, bluff: 0.05 },
+  calling: { name: '跟注站', tightness: 0.7, aggression: 0.2, bluff: 0.04 },
+  tight: { name: '紧凶', tightness: 0.55, aggression: 0.62, bluff: 0.12 },
+  lag: { name: '松凶', tightness: 0.28, aggression: 0.86, bluff: 0.28 },
+  balanced: { name: '均衡', tightness: 0.48, aggression: 0.55, bluff: 0.15 },
+};
+
+const STREET_ITERATIONS = {
+  preflop: 200,
+  flop: 240,
+  turn: 280,
+  river: 340,
+};
+
+/**
+ * 对手越多，每轮模拟就要多评估几手牌，成本是线性上涨的。
+ * 用 1/sqrt(对手数) 压低迭代次数，让单次决策的开销大致保持恒定 ——
+ * 胜率精度会掉几个百分点，但对休闲对局完全够用，而且手机才不会卡。
+ */
+function iterationsFor(phase, opponents) {
+  const base = STREET_ITERATIONS[phase] ?? 260;
+  return Math.max(90, Math.round(base / Math.sqrt(Math.max(1, opponents))));
+}
+
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+/**
+ * 蒙特卡洛胜率估算。
+ * 随机补完公共牌并给每个对手发随机底牌，比较牌力，返回 [0, 1] 的胜率。
+ */
+export function estimateEquity(hole, board, opponentCount, iterations, rng) {
+  const dead = new Set([...hole, ...board]);
+  const live = freshDeck().filter((c) => !dead.has(c));
+  const needBoard = 5 - board.length;
+  const cardsNeeded = needBoard + opponentCount * 2;
+  if (cardsNeeded > live.length) return 0.5;
+
+  const my7 = new Array(7);
+  const opp7 = new Array(7);
+  const simBoard = new Array(5);
+  const pool = new Array(live.length);
+
+  let equity = 0;
+  for (let iter = 0; iter < iterations; iter++) {
+    // 复制牌堆后只做前 N 步 Fisher-Yates，够用且比全洗快
+    for (let i = 0; i < live.length; i++) pool[i] = live[i];
+    for (let i = 0; i < cardsNeeded; i++) {
+      const j = i + Math.floor(rng() * (pool.length - i));
+      const tmp = pool[i];
+      pool[i] = pool[j];
+      pool[j] = tmp;
+    }
+
+    let cursor = 0;
+    for (let i = 0; i < board.length; i++) simBoard[i] = board[i];
+    for (let i = 0; i < needBoard; i++) simBoard[board.length + i] = pool[cursor++];
+
+    my7[0] = hole[0];
+    my7[1] = hole[1];
+    for (let i = 0; i < 5; i++) my7[2 + i] = simBoard[i];
+    const myScore = evaluateBest(my7);
+
+    let better = 0;
+    let equal = 0;
+    for (let o = 0; o < opponentCount; o++) {
+      opp7[0] = pool[cursor++];
+      opp7[1] = pool[cursor++];
+      for (let i = 0; i < 5; i++) opp7[2 + i] = simBoard[i];
+      const score = evaluateBest(opp7);
+      if (score > myScore) better++;
+      else if (score === myScore) equal++;
+    }
+
+    if (better === 0) equity += equal === 0 ? 1 : 1 / (equal + 1);
+  }
+
+  return equity / iterations;
+}
+
+const RANK_POINTS = { 14: 10, 13: 8, 12: 7, 11: 6 };
+
+/**
+ * Chen formula：起手牌强度评分，大约 -1 到 20 分。
+ *
+ * 蒙特卡洛算的是「对抗随机牌的胜率」，这个数字翻牌前没什么区分度
+ * （72o 对抗随机牌都有 35%），所以翻牌前额外用这个评分把烂牌挡在门外。
+ */
+export function chenScore(hole) {
+  if (!hole || hole.length !== 2) return 0;
+  const [a, b] = hole;
+  const hi = Math.max(rankOf(a), rankOf(b));
+  const lo = Math.min(rankOf(a), rankOf(b));
+  let score = RANK_POINTS[hi] ?? hi / 2;
+
+  if (hi === lo) return Math.max(score * 2, 5); // 对子
+
+  if (suitOf(a) === suitOf(b)) score += 2; // 同花
+
+  const gap = hi - lo - 1;
+  if (gap === 1) score -= 1;
+  else if (gap === 2) score -= 2;
+  else if (gap === 3) score -= 4;
+  else if (gap >= 4) score -= 5;
+
+  if (gap <= 1 && hi < 12) score += 1; // 有顺子潜力
+
+  return Math.ceil(score);
+}
+
+const round5 = (v) => Math.round(v / 5) * 5;
+
+/** 把「底池的几分之几」换算成合法的加注额。 */
+function raiseTarget(state, legal, fraction, pot, rng, aggression) {
+  let raw;
+  if (state.phase === PHASES.PREFLOP) {
+    // 翻牌前用「几个大盲」来定注额，比按底池比例自然得多
+    const bb = state.config.bigBlind;
+    raw =
+      state.currentBet <= bb
+        ? bb * 3
+        : state.currentBet * (2.4 + 0.7 * aggression);
+  } else {
+    raw = state.currentBet + (pot + legal.toCall) * fraction;
+  }
+  const jitter = 1 + (rng() - 0.5) * 0.16;
+  return clamp(round5(raw * jitter), legal.minRaiseTo, legal.maxRaiseTo);
+}
+
+/**
+ * 让某个座位做决定，返回一个 action 对象（不是直接改状态）。
+ *
+ * 翻牌前和翻牌后用的是两套判断：
+ *   翻牌前 —— 靠 Chen 评分决定要不要进池，因为翻前胜率几乎没有区分度；
+ *   翻牌后 —— 靠蒙特卡洛胜率对比底池赔率，但要求的胜率比裸赔率更高，
+ *             因为对手主动下注代表他的牌比随机牌强。
+ */
+export function decideBotAction(state, seatIdx, rng = Math.random) {
+  const legal = getLegalActions(state, seatIdx);
+  if (!legal) return null;
+
+  const seat = state.seats[seatIdx];
+  const preset = seat.bot ?? BOT_PRESETS.balanced;
+  const { tightness, aggression, bluff } = preset;
+
+  const opponents = state.seats.filter(
+    (s) => s.inHand && !s.folded && s.index !== seatIdx
+  ).length;
+  const iterations = iterationsFor(state.phase, opponents);
+  const sample = estimateEquity(seat.hole, state.board, opponents, iterations, rng);
+  const equity = clamp(sample + (rng() - 0.5) * 0.04, 0, 1);
+
+  const pot = totalPot(state);
+  const potOdds = legal.toCall > 0 ? legal.toCall / (pot + legal.toCall) : 0;
+  const bb = state.config.bigBlind;
+
+  const raise = (fraction) => ({
+    type: ACTION_TYPES.RAISE,
+    seat: seatIdx,
+    amount: raiseTarget(state, legal, fraction, pot, rng, aggression),
+  });
+  const call = () => ({
+    type: legal.canCheck ? ACTION_TYPES.CHECK : ACTION_TYPES.CALL,
+    seat: seatIdx,
+  });
+  const fold = () => ({ type: ACTION_TYPES.FOLD, seat: seatIdx });
+
+  // ------------------------------------------------------------ 翻牌前
+  if (state.phase === PHASES.PREFLOP) {
+    const score = chenScore(seat.hole);
+    const toCallBB = legal.toCall / bb;
+    // 要跟的大盲越多，门槛越高
+    const sizeFactor = Math.min(1, toCallBB / 6);
+    const callBar = 2.5 + 4 * tightness + sizeFactor * (3 + 3 * tightness);
+    const raiseBar = callBar + 3;
+
+    if (legal.canCheck) {
+      if (legal.canRaise && score >= raiseBar && rng() < 0.55 + 0.4 * aggression) {
+        return raise(0.7);
+      }
+      if (legal.canRaise && score >= 6 && rng() < 0.2 + 0.4 * aggression) {
+        return raise(0.5);
+      }
+      return call();
+    }
+
+    if (score < callBar) {
+      if (legal.canRaise && rng() < bluff * 0.08) return raise(0.7);
+      return fold();
+    }
+    if (legal.canRaise && score >= raiseBar && rng() < 0.4 + 0.45 * aggression) {
+      return raise(0.75);
+    }
+    return call();
+  }
+
+  // ------------------------------------------------------------ 翻牌后
+  if (legal.canCheck) {
+    const strong = equity > 0.68 + 0.08 * tightness;
+    const decent = equity > 0.52 + 0.06 * tightness;
+
+    if (strong && legal.canRaise) {
+      if (rng() < 0.2) return call(); // 偶尔慢打，别让"加注=大牌"太好读
+      return raise(0.55 + 0.3 * aggression);
+    }
+    if (decent && legal.canRaise && rng() < 0.45 + 0.4 * aggression) {
+      return raise(0.45 + 0.2 * aggression);
+    }
+    if (legal.canRaise && rng() < bluff * 0.3) return raise(0.5);
+    return call();
+  }
+
+  // 面对下注：对手主动下注说明他的牌强于随机牌，所以门槛要加一层保证金
+  const betRatio = Math.min(2, legal.toCall / Math.max(1, pot));
+  const margin = 0.02 + 0.07 * Math.min(1, betRatio) + 0.03 * (1 - tightness);
+
+  if (equity < potOdds + margin) {
+    if (legal.canRaise && rng() < bluff * 0.07) return raise(0.75);
+    return fold();
+  }
+  if (equity > 0.8 && legal.canRaise && rng() < 0.45 + 0.45 * aggression) {
+    return raise(0.65 + 0.35 * aggression);
+  }
+  if (legal.canRaise && equity > potOdds + margin + 0.2 && rng() < 0.2 + 0.45 * aggression) {
+    return raise(0.6);
+  }
+  return call();
+}
+
+/** 给非人类座位随机分配性格。 */
+export function attachBots(state, rng = createSeededRng(Date.now() >>> 0)) {
+  const kinds = Object.keys(BOT_PRESETS);
+  const next = structuredClone(state);
+  for (const seat of next.seats) {
+    if (seat.isHuman) continue;
+    const kind = kinds[Math.floor(rng() * kinds.length)];
+    seat.bot = { ...BOT_PRESETS[kind], kind };
+  }
+  return next;
+}

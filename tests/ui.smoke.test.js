@@ -1,0 +1,229 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+
+/**
+ * 界面冒烟测试。
+ *
+ * 只用一个极简的 DOM 桩，不起浏览器，专门用来抓
+ * "getElementById 拿到 null"、"渲染时用了不存在的字段" 这类接线错误。
+ */
+
+class ClassList {
+  constructor() {
+    this.set = new Set();
+  }
+  add(...names) {
+    names.forEach((n) => this.set.add(n));
+  }
+  remove(...names) {
+    names.forEach((n) => this.set.delete(n));
+  }
+  contains(name) {
+    return this.set.has(name);
+  }
+  toggle(name, force) {
+    const on = force === undefined ? !this.set.has(name) : Boolean(force);
+    if (on) this.set.add(name);
+    else this.set.delete(name);
+    return on;
+  }
+}
+
+class Style {
+  constructor() {
+    this.props = new Map();
+  }
+  setProperty(key, value) {
+    this.props.set(key, value);
+  }
+}
+
+class El {
+  constructor(tag) {
+    this.tagName = String(tag).toUpperCase();
+    this.children = [];
+    this.parentNode = null;
+    this.classList = new ClassList();
+    this.style = new Style();
+    this.listeners = new Map();
+    this.text = '';
+    this.scrollTop = 0;
+    this.scrollHeight = 0;
+  }
+
+  get className() {
+    return [...this.classList.set].join(' ');
+  }
+  set className(value) {
+    this.classList = new ClassList();
+    String(value)
+      .split(/\s+/)
+      .filter(Boolean)
+      .forEach((c) => this.classList.add(c));
+  }
+
+  get textContent() {
+    return this.text + this.children.map((c) => c.textContent).join('');
+  }
+  set textContent(value) {
+    this.text = String(value);
+    this.children = [];
+  }
+
+  get innerHTML() {
+    return this.text;
+  }
+  set innerHTML(value) {
+    this.text = String(value);
+    this.children = [];
+  }
+
+  appendChild(child) {
+    this.children.push(child);
+    child.parentNode = this;
+    return child;
+  }
+  append(...nodes) {
+    for (const node of nodes) this.appendChild(node);
+  }
+
+  get childElementCount() {
+    return this.children.length;
+  }
+
+  addEventListener(type, handler) {
+    if (!this.listeners.has(type)) this.listeners.set(type, []);
+    this.listeners.get(type).push(handler);
+  }
+  dispatch(type, extra = {}) {
+    for (const handler of this.listeners.get(type) ?? []) {
+      handler({ type, target: this, preventDefault() {}, ...extra });
+    }
+  }
+
+  /** 深度优先找出所有按钮，方便测试点它。 */
+  findButtons(out = []) {
+    if (this.tagName === 'BUTTON') out.push(this);
+    for (const child of this.children) child.findButtons(out);
+    return out;
+  }
+}
+
+const byId = new Map();
+const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+for (const match of html.matchAll(/id="([^"]+)"/g)) {
+  byId.set(match[1], new El('div'));
+}
+
+globalThis.document = {
+  createElement: (tag) => new El(tag),
+  getElementById: (id) => byId.get(id) ?? null,
+};
+globalThis.window = globalThis.window ?? {};
+globalThis.window.addEventListener = () => {};
+
+const { debug } = await import('../src/ui/app.js');
+
+// ---------------------------------------------------------------------------
+
+test('初始渲染：6 个座位、HUD、底牌明暗都正确', () => {
+  debug.stop();
+
+  const seats = byId.get('seat-layer');
+  assert.equal(seats.children.length, 6, '应该建出 6 个座位');
+  assert.match(byId.get('hud-blinds').textContent, /10 \/ 20/);
+  assert.match(byId.get('hud-hand').textContent, /第 1 手/);
+
+  const state = debug.getState();
+  assert.equal(state.phase, 'preflop');
+  assert.equal(state.seats[0].isHuman, true);
+  assert.equal(byId.get('pot-amount').textContent, '30', '盲注已经进池');
+
+  // 座位骨架顺序是 hole → plate → dealer → badge
+  const heroCards = seats.children[0].children[0];
+  assert.equal(heroCards.children.length, 2);
+  assert.ok(
+    heroCards.children.every((c) => !c.classList.contains('back')),
+    '自己的底牌必须看得见'
+  );
+
+  const botCards = seats.children[3].children[0];
+  assert.ok(
+    botCards.children.every((c) => c.classList.contains('back')),
+    '机器人的底牌应该是暗牌'
+  );
+
+  // 公共牌位置应该摆了 5 个占位槽
+  assert.equal(byId.get('community').children.length, 5);
+  debug.stop();
+});
+
+test('操作栏会轮到自己时出现按钮，轮到机器人时显示等待', () => {
+  debug.stop();
+  const bar = byId.get('actionbar');
+  const state = debug.getState();
+
+  if (state.toAct === 0) {
+    const labels = bar.findButtons().map((b) => b.textContent);
+    assert.ok(labels.some((l) => l.includes('弃牌')), `应该能弃牌，实际按钮：${labels}`);
+    assert.ok(labels.some((l) => l.includes('过牌') || l.includes('跟注')));
+  } else {
+    assert.match(bar.textContent, /正在思考/);
+  }
+  debug.stop();
+});
+
+test('连续打完多手牌不会崩，且筹码守恒', () => {
+  debug.stop();
+  const initialTotal = 6 * 2000;
+
+  for (let hand = 0; hand < 5; hand++) {
+    debug.newHand();
+    let guard = 0;
+    while (!debug.isHandOver() && guard++ < 400) {
+      const state = debug.getState();
+      const actor = state.seats[state.toAct];
+      if (actor.isHuman) {
+        const legal = debug.legal();
+        debug.humanAct(legal.canCheck ? 'check' : 'call');
+      } else {
+        assert.ok(debug.botAct(), `座位 ${state.toAct} 应该能做出行动`);
+      }
+    }
+    assert.ok(guard < 400, `第 ${hand + 1} 手没有正常结束`);
+
+    const state = debug.getState();
+    assert.equal(state.phase, 'handOver');
+    assert.ok(state.result, '结束后必须有结算结果');
+    assert.equal(
+      state.seats.reduce((sum, s) => sum + s.stack, 0),
+      initialTotal,
+      `第 ${hand + 1} 手之后筹码不守恒`
+    );
+  }
+
+  debug.stop();
+});
+
+test('点按钮能真的推进牌局', () => {
+  debug.stop();
+  debug.newHand();
+
+  // 一直让机器人走到玩家行动
+  let guard = 0;
+  while (debug.getState().toAct !== 0 && guard++ < 50) {
+    if (!debug.botAct()) break;
+  }
+
+  if (debug.getState().toAct === 0) {
+    const bar = byId.get('actionbar');
+    const fold = bar.findButtons().find((b) => b.textContent.includes('弃牌'));
+    assert.ok(fold, '轮到自己时应该有一个弃牌按钮');
+    fold.dispatch('click');
+    const after = debug.getState();
+    assert.equal(after.seats[0].folded, true, '点了弃牌就应该真的弃牌');
+  }
+
+  debug.stop();
+});

@@ -1,0 +1,27 @@
+{
+  "name": "德州扑克 · 6 人桌",
+  "short_name": "德州扑克",
+  "description": "手机网页版单机德州扑克：6 人桌、无限注、固定盲注",
+  "lang": "zh-CN",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#061711",
+  "theme_color": "#08251a",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    {
+      "src": "icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

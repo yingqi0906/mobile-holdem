@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#08251a" />
+    <meta name="description" content="手机网页版单机德州扑克：6 人桌、无限注、固定盲注" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="德州扑克" />
+    <title>德州扑克 · 6 人桌</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="icons/icon.svg" />
+    <link rel="stylesheet" href="styles/main.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="hud">
+        <div class="hud-info">
+          <span id="hud-blinds">盲注 10 / 20</span>
+          <span class="dot">·</span>
+          <span id="hud-hand">第 1 手</span>
+        </div>
+        <div class="hud-actions">
+          <button id="btn-log" class="icon-btn" type="button">记录</button>
+          <button id="btn-new" class="icon-btn" type="button">重开</button>
+        </div>
+      </header>
+
+      <main class="table-area">
+        <div class="felt">
+          <div class="board">
+            <div class="pot-row">
+              <span class="pot-icon"></span>
+              <span id="pot-amount">0</span>
+            </div>
+            <div class="community" id="community"></div>
+            <div class="street-label" id="street-label">等待开局</div>
+          </div>
+        </div>
+        <div class="chip-layer" id="chip-layer"></div>
+        <div class="seat-layer" id="seat-layer"></div>
+      </main>
+
+      <section class="actionbar" id="actionbar"></section>
+
+      <aside class="logpanel hidden" id="logpanel">
+        <header class="log-head">
+          <h2>行动记录</h2>
+          <button id="log-close" class="icon-btn" type="button">关闭</button>
+        </header>
+        <ol id="log-list"></ol>
+      </aside>
+
+      <div class="overlay hidden" id="overlay"></div>
+    </div>
+
+    <script type="module" src="src/ui/app.js"></script>
+  </body>
+</html>

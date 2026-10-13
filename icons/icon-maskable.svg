@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="德州扑克">
+  <defs>
+    <linearGradient id="felt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1f7d5a"/>
+      <stop offset="1" stop-color="#08251a"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#felt)"/>
+  <g transform="translate(256 256) scale(0.66) translate(-256 -256)">
+    <circle cx="256" cy="256" r="196" fill="none" stroke="#d8b568" stroke-width="18" opacity="0.75"/>
+    <path
+      d="M256 96
+         C 256 96, 128 196, 128 278
+         C 128 320, 160 350, 200 350
+         C 226 350, 246 336, 252 316
+         C 250 352, 236 384, 208 410
+         L 304 410
+         C 276 384, 262 352, 260 316
+         C 266 336, 286 350, 312 350
+         C 352 350, 384 320, 384 278
+         C 384 196, 256 96, 256 96
+         Z"
+      fill="#f7f5ee"
+    />
+  </g>
+</svg>
