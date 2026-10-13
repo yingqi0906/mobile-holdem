@@ -565,9 +565,21 @@ function commit(state, seat, amount) {
   return paid;
 }
 
-function recordAction(state, seat, label, amount) {
-  // label 是给界面显示的中文短语，例如「加注到 120」「跟注 40」
-  seat.lastAction = amount === undefined ? { label } : { label: `${label} ${amount}` };
+/**
+ * 记下一次行动。
+ *
+ * kind 是给界面用的动作类别（fold / check / call / raise / allIn），
+ * 界面据此决定用哪种颜色的特效；seq 每动一次自增，界面靠它判断
+ * "这是一个新动作"，从而重新播放动画 —— 光看文字会因为连续两次
+ * 相同的「跟注」而漏掉第二次。
+ */
+function recordAction(state, seat, label, amount, kind) {
+  state.actionSeq = (state.actionSeq ?? 0) + 1;
+  seat.lastAction = {
+    label: amount === undefined ? label : `${label} ${amount}`,
+    kind,
+    seq: state.actionSeq,
+  };
   state.events.push({ type: 'action', seat: seat.index, action: label, amount });
   state.log.push({ hand: state.handNumber, text: `${seat.name} ${amount !== undefined ? `${label} ${amount}` : label}` });
 }
@@ -635,14 +647,14 @@ export function applyAction(prev, action, rng = defaultRng()) {
     case ACTION_TYPES.FOLD: {
       seat.folded = true;
       seat.hasActed = true;
-      recordAction(state, seat, '弃牌');
+      recordAction(state, seat, '弃牌', undefined, 'fold');
       return advance(state);
     }
 
     case ACTION_TYPES.CHECK: {
       if (!legal.canCheck) throw new Error('有人下注，不能过牌');
       seat.hasActed = true;
-      recordAction(state, seat, '过牌');
+      recordAction(state, seat, '过牌', undefined, 'check');
       return advance(state);
     }
 
@@ -651,14 +663,14 @@ export function applyAction(prev, action, rng = defaultRng()) {
         // 不需要跟注时按过牌处理，界面上的"跟注"按钮在此时就是过牌
         if (legal.canCheck) {
           seat.hasActed = true;
-          recordAction(state, seat, '过牌');
+          recordAction(state, seat, '过牌', undefined, 'check');
           return advance(state);
         }
         throw new Error('没有可跟注的金额');
       }
       const paid = commit(state, seat, legal.toCall);
       seat.hasActed = true;
-      recordAction(state, seat, seat.allIn ? '全下跟注' : '跟注', paid);
+      recordAction(state, seat, seat.allIn ? '全下跟注' : '跟注', paid, seat.allIn ? 'allIn' : 'call');
       return advance(state);
     }
 
@@ -673,7 +685,8 @@ export function applyAction(prev, action, rng = defaultRng()) {
         state,
         seat,
         state.currentBet === target && seat.allIn ? '全下加注' : '加注到',
-        target
+        target,
+        seat.allIn ? 'allIn' : 'raise'
       );
       return advance(state);
     }
@@ -684,11 +697,11 @@ export function applyAction(prev, action, rng = defaultRng()) {
         // 筹码不够跟注，就是一次短码跟注
         const paid = commit(state, seat, legal.toCall);
         seat.hasActed = true;
-        recordAction(state, seat, '全下跟注', paid);
+        recordAction(state, seat, '全下跟注', paid, 'allIn');
         return advance(state);
       }
       applyRaise(state, seatIdx, target);
-      recordAction(state, seat, '全下', target);
+      recordAction(state, seat, '全下', target, 'allIn');
       return advance(state);
     }
 

@@ -21,7 +21,7 @@ import { bestFive } from '../core/evaluator.js';
 import { createCryptoRng } from '../core/rng.js';
 
 /** 每次发布时改一下这个号，界面上能看到，方便确认自己加载的是哪一版。 */
-const BUILD = 'v0.9';
+const BUILD = 'v0.10';
 
 const CONFIG = {
   smallBlind: 1,
@@ -262,6 +262,8 @@ function buildSeats() {
       dealer,
       pos,
       holeSig: null,
+      actSeq: null,
+      lastBet: 0,
     });
   }
 }
@@ -314,7 +316,7 @@ function renderSeats() {
 
     // 状态徽标
     let badgeText = '';
-    let badgeFold = false;
+    let badgeKind = '';
     // 摊牌时每个亮牌的人都显示自己的牌型，不只是赢家
     const showdownInfo = isHandOver()
       ? state.result?.shown?.find((s) => s.seat === seat.index)
@@ -325,25 +327,43 @@ function renderSeats() {
 
     if (showdownInfo) {
       badgeText = showdownInfo.description;
+      badgeKind = 'showdown';
     } else if (winInfo) {
       badgeText = '赢得底池';
+      badgeKind = 'win';
     } else if (seat.inHand && seat.folded) {
       badgeText = '弃牌';
-      badgeFold = true;
+      badgeKind = 'fold';
     } else if (seat.inHand && seat.allIn) {
       badgeText = '全下';
+      badgeKind = 'allIn';
     } else if (seat.lastAction) {
       badgeText = seat.lastAction.label;
+      badgeKind = seat.lastAction.kind ?? '';
     }
     ui.badge.textContent = badgeText;
-    ui.badge.classList.toggle('fold', badgeFold);
+    ui.badge.className = badgeKind ? `badge ${badgeKind}` : 'badge';
     ui.badge.style.display = badgeText ? 'block' : 'none';
+
+    // 有人做了新动作 —— 放个光环、让徽标弹一下，别让它一闪而过。
+    // 用 seq 而不是文字判断，否则连续两次「跟注 2」会被当成没变化。
+    const seq = seat.lastAction?.seq ?? null;
+    if (seq !== null && seq !== ui.actSeq) {
+      ui.actSeq = seq;
+      playActionEffect(seat.index, seat.lastAction.kind);
+      pulse(ui.badge, 'pop');
+    }
 
     // 桌面上的下注筹码
     if (seat.streetBet > 0) {
-      ui.betValue.textContent = String(seat.streetBet);
+      if (ui.lastBet !== seat.streetBet) {
+        ui.lastBet = seat.streetBet;
+        ui.betValue.textContent = String(seat.streetBet);
+        pulse(ui.chip, 'pulse');
+      }
       ui.chip.style.display = 'flex';
     } else {
+      ui.lastBet = 0;
       ui.chip.style.display = 'none';
     }
   }
@@ -792,6 +812,26 @@ function showWinDelta(seatIdx, amount) {
   setTimeout(() => node.remove(), 1800);
 }
 
+/** 重新触发一次 CSS 动画 —— 单纯反复加同一个 class 是不会重播的。 */
+function pulse(node, className) {
+  node.classList.remove(className);
+  void node.offsetWidth; // 读一下布局，强制浏览器重排
+  node.classList.add(className);
+}
+
+/**
+ * 座位周围扩散一圈彩色光环，标明这个座位刚刚做了什么。
+ * 单机版里机器人一个接一个行动，没有这个的话动作就是一闪而过。
+ */
+function playActionEffect(seatIdx, kind) {
+  const pos = POSITIONS[seatIdx] ?? POSITIONS[0];
+  const node = el('div', `seat-flash ${kind ?? ''}`);
+  node.style.setProperty('--x', `${pos.x}%`);
+  node.style.setProperty('--y', `${pos.y}%`);
+  els.chipLayer.appendChild(node);
+  setTimeout(() => node.remove(), 900);
+}
+
 /**
  * 结算面板里的一个分节：小标题 +（可选说明）+ 一排牌。
  * 公共牌和最佳五张都用它，保证两处的排版完全一致。
@@ -851,35 +891,50 @@ function heroIsOut() {
 
 function scheduleBots(delay) {
   clearTimeout(botTimer);
-  const base = heroIsOut() ? 170 : 420;
-  botTimer = setTimeout(stepBots, delay ?? base + Math.random() * base * 0.9);
+  botTimer = setTimeout(stepBots, delay ?? botDelay());
 }
 
-/** 同步跑一次机器人行动，返回是否真的行动了。 */
+/** 同步跑一次机器人行动；返回它实际用的 action，没行动则返回 null。 */
 function performBotAction() {
-  if (isHandOver()) return false;
+  if (isHandOver()) return null;
   const seat = state.seats[state.toAct];
-  if (!seat || seat.isHuman) return false;
+  if (!seat || seat.isHuman) return null;
   const action = decideBotAction(state, state.toAct, rng);
-  if (!action) return false;
+  if (!action) return null;
   state = applyAction(state, action, rng);
   render();
-  return true;
+  return action;
+}
+
+/**
+ * 两次行动之间停多久 —— 这个值直接决定"看不看得清"。
+ * 太快像跳过，太慢又拖沓。加注和全下是最需要看清的信息，所以额外多停一会儿。
+ */
+function botDelay(action) {
+  const base = heroIsOut() ? 460 : 720;
+  const weight =
+    action?.type === ACTION_TYPES.RAISE || action?.type === ACTION_TYPES.ALL_IN ? 1.45 : 1;
+  return Math.round(base * weight * (0.8 + Math.random() * 0.45));
 }
 
 function stepBots() {
   if (isHandOver()) return;
-  if (!performBotAction()) {
+  const before = state.phase;
+  const action = performBotAction();
+  if (!action) {
     render();
     return;
   }
-  scheduleBots();
+  // 换街（发牌）之后再停一下，让人看清新发的牌
+  const extra = state.phase !== before ? 520 : 0;
+  scheduleBots(extra + botDelay(action));
 }
 
 function humanAct(type, amount) {
   if (isHandOver()) return;
   const hero = humanSeat(state);
   if (state.toAct !== hero.index) return;
+  const before = state.phase;
   try {
     state = applyAction(state, { seat: hero.index, type, amount }, rng);
   } catch (err) {
@@ -889,7 +944,7 @@ function humanAct(type, amount) {
     return;
   }
   render();
-  if (!isHandOver()) scheduleBots(260);
+  if (!isHandOver()) scheduleBots((state.phase !== before ? 520 : 0) + botDelay());
 }
 
 function newHand() {
@@ -917,7 +972,7 @@ function newHand() {
     els.actionbar.appendChild(el('div', 'status-line', '桌上没有足够的玩家，点右上角重开'));
     return;
   }
-  scheduleBots(760);
+  scheduleBots(900);
 }
 
 function hardReset() {

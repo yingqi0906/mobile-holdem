@@ -33,6 +33,11 @@ const chrome = spawn(
     '--disable-gpu',
     '--no-first-run',
     '--no-default-browser-check',
+    // 无头模式默认会把后台标签页的定时器节流到 1 秒一次甚至更慢，
+    // 那样测出来的"节奏"全是假的
+    '--disable-background-timer-throttling',
+    '--disable-backgrounding-occluded-windows',
+    '--disable-renderer-backgrounding',
     `--remote-debugging-port=${PORT}`,
     `--user-data-dir=${profile}`,
     'about:blank',
@@ -134,6 +139,7 @@ const MEASURE = `(() => {
     ['resultNext', '.result-next'], ['overlay', '.overlay'],
     ['hudNet', '#btn-chips'], ['chipPanel', '#chippanel'],
     ['chipStats', '.chip-stats'], ['chipChart', '.chip-chart'],
+    ['seatFlash', '.seat-flash'], ['betChip', '.bet-chip'],
   ]) {
     const el = document.querySelector(sel);
     if (el) out.nodes[name] = rect(el);
@@ -160,6 +166,10 @@ const MEASURE = `(() => {
   if (hudEl) out.hudText = hudEl.innerText.replace(/\\n+/g, ' ');
   const listEl = document.querySelector('.showdown-list');
   if (listEl) out.showdownRows = [...listEl.children].map((li) => li.innerText.replace(/\\n/g, ' | '));
+  const badges = [...document.querySelectorAll('.seat .badge')]
+    .filter((b) => b.style.display !== 'none' && b.textContent.trim())
+    .map((b) => b.className + ': ' + b.textContent.trim());
+  if (badges.length) out.badges = badges;
   document.querySelectorAll('.seat').forEach((el, i) => {
     out.seats.push({
       i, ...rect(el),
@@ -265,6 +275,42 @@ const SCRIPT_OPEN_CHIPS = `(() => {
   return btn ? 'opened' : 'no-button';
 })()`;
 
+// 让一个机器人行动一次，然后立刻量测 —— 光环只存在 0.9 秒
+const SCRIPT_ACTION = `(() => {
+  const d = window.__holdem;
+  if (!d) return 'no-debug-hook';
+  d.stop();
+  d.newHand();
+  d.stop();
+  return d.botAct() ? 'ok' : 'no-action';
+})()`;
+
+// 让玩家自动跟注，这样牌局能一直跑下去，用来实测节奏
+const SCRIPT_AUTOPLAY = `(() => {
+  const d = window.__holdem;
+  if (!d) return 'no-debug-hook';
+  // 注意：这里不能调 d.stop()，那会把机器人的定时器链一起清掉，
+  // 牌局就永远卡在机器人那里了
+  window.__marks = [];
+  let lastHand = -1;
+  window.__auto = setInterval(() => {
+    const s = d.getState();
+    if (d.isHandOver()) {
+      if (s.handNumber !== lastHand) {
+        lastHand = s.handNumber;
+        window.__marks.push({ hand: s.handNumber, t: Math.round(performance.now()) });
+      }
+      d.newHand();
+      return;
+    }
+    if (s.toAct === 0) {
+      const l = d.legal();
+      if (l) d.humanAct(l.canCheck ? 'check' : 'call');
+    }
+  }, 300);
+  return 'started';
+})()`;
+
 async function main() {
   await waitForDevtools();
   const target = await newTarget('about:blank');
@@ -292,6 +338,25 @@ async function main() {
     const note = await cdp.eval(SCRIPT_OPEN_CHIPS);
     if (note !== 'opened') console.error('提示：', note);
     await sleep(400);
+  } else if (scenario === 'action') {
+    const note = await cdp.eval(SCRIPT_ACTION);
+    if (note !== 'ok') console.error('提示：', note);
+    await sleep(120);
+  } else if (scenario === 'pace') {
+    // 让玩家自动跟注，这样牌局能连续跑，才好量真实节奏
+    const started = await cdp.eval(SCRIPT_AUTOPLAY);
+    if (started !== 'started') console.error('提示：', started);
+    await sleep(24000);
+    const marks = (await cdp.eval('window.__marks')) ?? [];
+    if (marks.length >= 2) {
+      const gaps = [];
+      for (let i = 1; i < marks.length; i++) gaps.push(marks[i].t - marks[i - 1].t);
+      const avg = Math.round(gaps.reduce((a, b) => a + b, 0) / gaps.length);
+      console.error(`每手耗时（毫秒）：${gaps.join(', ')}`);
+      console.error(`24 秒打了 ${marks.length} 手，平均每手 ${avg}ms`);
+    } else {
+      console.error(`24 秒只完成了 ${marks.length} 手`);
+    }
   }
 
   const report = await cdp.eval(MEASURE);

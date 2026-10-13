@@ -483,3 +483,38 @@ test('翻牌前的快捷加注按钮按大盲计', () => {
   debug.newHand();
   debug.stop();
 });
+
+test('有人行动时会播放动作特效并给徽标上色', () => {
+  debug.stop();
+  debug.newHand();
+  debug.stop();
+
+  assert.ok(debug.botAct(), '机器人应该能动一次');
+
+  // 座位周围应该出现一圈带动作类型的光环
+  const chips = byId.get('chip-layer');
+  const flashes = chips.children.filter((n) => n.classList.contains('seat-flash'));
+  assert.ok(flashes.length >= 1, '应该有座位光环特效');
+  const kinds = ['fold', 'check', 'call', 'raise', 'allIn'];
+  assert.ok(
+    kinds.some((k) => flashes[0].classList.contains(k)),
+    `光环应该带上动作类型，实际 class：${flashes[0].className}`
+  );
+
+  // 徽标也要带类型，界面才能按动作上色
+  const badges = byId
+    .get('seat-layer')
+    .children.map((seat) => seat.children[3]);
+  assert.ok(
+    badges.some((b) => b.classList.contains('pop')),
+    '被操作的座位徽标应该弹一下'
+  );
+  assert.ok(
+    badges.some((b) => kinds.some((k) => b.classList.contains(k))),
+    `应该有徽标带上动作类型：${badges.map((b) => b.className).join(' / ')}`
+  );
+
+  debug.stop();
+  debug.newHand();
+  debug.stop();
+});

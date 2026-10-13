@@ -510,7 +510,116 @@ body {
 }
 
 .seat .badge.fold {
-  color: #f19a92;
+  color: #c9a29d;
+}
+
+.seat .badge.check {
+  color: rgba(238, 244, 240, 0.72);
+}
+
+.seat .badge.call {
+  color: #7ce0a7;
+  border-color: rgba(124, 224, 167, 0.36);
+}
+
+.seat .badge.raise {
+  color: var(--gold);
+  border-color: rgba(242, 197, 61, 0.5);
+  background: rgba(38, 28, 4, 0.9);
+}
+
+.seat .badge.allIn {
+  color: #ffdad4;
+  font-weight: 700;
+  border-color: rgba(220, 90, 78, 0.72);
+  background: rgba(66, 13, 9, 0.94);
+}
+
+.seat .badge.win,
+.seat .badge.showdown {
+  color: var(--gold);
+  border-color: rgba(242, 197, 61, 0.45);
+}
+
+@keyframes badge-pop {
+  0% {
+    transform: translateX(-50%) scale(0.6);
+  }
+  55% {
+    transform: translateX(-50%) scale(1.12);
+  }
+  100% {
+    transform: translateX(-50%) scale(1);
+  }
+}
+
+.seat .badge.pop {
+  animation: badge-pop 0.34s cubic-bezier(0.2, 1.2, 0.4, 1);
+}
+
+/* 有人行动时，座位周围扩散一圈彩色光环 */
+
+.seat-flash {
+  position: absolute;
+  left: var(--x);
+  top: var(--y);
+  width: 74px;
+  height: 74px;
+  margin: -37px 0 0 -37px;
+  border-radius: 50%;
+  border: 3px solid currentColor;
+  opacity: 0;
+  pointer-events: none;
+  animation: seat-flash 0.85s ease-out forwards;
+}
+
+.seat-flash.check {
+  color: rgba(238, 244, 240, 0.5);
+}
+
+.seat-flash.call {
+  color: #26a75f;
+}
+
+.seat-flash.raise {
+  color: var(--gold);
+}
+
+.seat-flash.allIn {
+  color: #dc5a4e;
+  border-width: 5px;
+}
+
+.seat-flash.fold {
+  color: rgba(255, 255, 255, 0.3);
+  border-style: dashed;
+}
+
+@keyframes seat-flash {
+  0% {
+    opacity: 0.95;
+    transform: scale(0.5);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.45);
+  }
+}
+
+@keyframes chip-pulse {
+  0% {
+    transform: translate(-50%, -50%) scale(1);
+  }
+  45% {
+    transform: translate(-50%, -50%) scale(1.28);
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+.bet-chip.pulse {
+  animation: chip-pulse 0.36s ease-out;
 }
 
 /* 还没发到手的空位 */
