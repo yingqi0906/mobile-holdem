@@ -8,6 +8,8 @@
     "test": "node --test",
     "serve": "node tools/serve.js",
     "sim": "node tools/sim.js",
+    "profile": "node tools/profile.mjs",
+    "exploit": "node tools/exploit.mjs",
     "share": "powershell -ExecutionPolicy Bypass -File tools/share.ps1"
   },
   "engines": {

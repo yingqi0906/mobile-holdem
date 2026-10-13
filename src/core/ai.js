@@ -161,9 +161,17 @@ export function decideBotAction(state, seatIdx, rng = Math.random) {
   const opponents = state.seats.filter(
     (s) => s.inHand && !s.folded && s.index !== seatIdx
   ).length;
-  const iterations = iterationsFor(state.phase, opponents);
-  const sample = estimateEquity(seat.hole, state.board, opponents, iterations, rng);
-  const equity = clamp(sample + (rng() - 0.5) * 0.04, 0, 1);
+  // 翻前的决策完全靠 Chen 评分，用不到胜率 —— 所以这里惰性计算，
+  // 省掉一次蒙特卡洛。手机上每次决策能少几毫秒。
+  let equityCache = null;
+  const equity = () => {
+    if (equityCache === null) {
+      const iterations = iterationsFor(state.phase, opponents);
+      const sample = estimateEquity(seat.hole, state.board, opponents, iterations, rng);
+      equityCache = clamp(sample + (rng() - 0.5) * 0.04, 0, 1);
+    }
+    return equityCache;
+  };
 
   const pot = totalPot(state);
   const potOdds = legal.toCall > 0 ? legal.toCall / (pot + legal.toCall) : 0;
@@ -211,8 +219,8 @@ export function decideBotAction(state, seatIdx, rng = Math.random) {
 
   // ------------------------------------------------------------ 翻牌后
   if (legal.canCheck) {
-    const strong = equity > 0.68 + 0.08 * tightness;
-    const decent = equity > 0.52 + 0.06 * tightness;
+    const strong = equity() > 0.68 + 0.08 * tightness;
+    const decent = equity() > 0.52 + 0.06 * tightness;
 
     if (strong && legal.canRaise) {
       if (rng() < 0.2) return call(); // 偶尔慢打，别让"加注=大牌"太好读
@@ -229,14 +237,14 @@ export function decideBotAction(state, seatIdx, rng = Math.random) {
   const betRatio = Math.min(2, legal.toCall / Math.max(1, pot));
   const margin = 0.02 + 0.07 * Math.min(1, betRatio) + 0.03 * (1 - tightness);
 
-  if (equity < potOdds + margin) {
+  if (equity() < potOdds + margin) {
     if (legal.canRaise && rng() < bluff * 0.07) return raise(0.75);
     return fold();
   }
-  if (equity > 0.8 && legal.canRaise && rng() < 0.45 + 0.45 * aggression) {
+  if (equity() > 0.8 && legal.canRaise && rng() < 0.45 + 0.45 * aggression) {
     return raise(0.65 + 0.35 * aggression);
   }
-  if (legal.canRaise && equity > potOdds + margin + 0.2 && rng() < 0.2 + 0.45 * aggression) {
+  if (legal.canRaise && equity() > potOdds + margin + 0.2 && rng() < 0.2 + 0.45 * aggression) {
     return raise(0.6);
   }
   return call();
