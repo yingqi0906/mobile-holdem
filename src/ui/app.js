@@ -32,13 +32,16 @@ const CONFIG = {
  * 0 号位是玩家自己，在正下方；之后顺时针（屏幕左边往上、顶部、右边往下）排列。
  */
 const POSITIONS = [
-  { x: 50, y: 85 },
-  { x: 13, y: 64 },
+  { x: 50, y: 89 },
+  { x: 13, y: 72 },
   { x: 19, y: 16 },
-  { x: 50, y: 9 },
+  { x: 50, y: 10 },
   { x: 81, y: 16 },
-  { x: 87, y: 64 },
+  { x: 87, y: 72 },
 ];
+
+/** 下注筹码摆在「座位 → 桌心」这条线上，0.42 是离座位的距离比例。 */
+const BET_OFFSET = 0.42;
 
 const STREET_NAMES = {
   [PHASES.PREFLOP]: '翻牌前',
@@ -89,6 +92,14 @@ const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const round5 = (v) => Math.round(v / 5) * 5;
 const isHandOver = () => state.phase === PHASES.HAND_OVER || state.phase === PHASES.IDLE;
 
+/** 头像里的缩写：中文名取第一个字，英文名取前两个字母。 */
+function initials(name) {
+  const trimmed = String(name ?? '').trim();
+  if (!trimmed) return '?';
+  if (/^[\x20-\x7f]+$/.test(trimmed)) return trimmed.slice(0, 2).toUpperCase();
+  return trimmed.slice(0, 1);
+}
+
 function cardEl(card, { faceDown = false, board = false } = {}) {
   const node = el('div', 'card');
   if (board) node.classList.add('board-card');
@@ -119,6 +130,7 @@ function buildSeats() {
   seatEls.length = 0;
 
   for (let i = 0; i < state.seats.length; i++) {
+    const seat = state.seats[i];
     const pos = POSITIONS[i] ?? POSITIONS[POSITIONS.length - 1];
     const seatEl = el('div', 'seat');
     seatEl.style.setProperty('--x', `${pos.x}%`);
@@ -126,28 +138,53 @@ function buildSeats() {
     if (pos.y < 50) seatEl.classList.add('top');
 
     const hole = el('div', 'hole');
+
+    // 圆形头像 + 行动计时环（GGPoker 那个标志性的圈）
+    const avatar = el('div', 'avatar');
+    avatar.innerHTML =
+      '<svg class="ring" viewBox="0 0 100 100" aria-hidden="true">' +
+      '<circle class="track" cx="50" cy="50" r="46"></circle>' +
+      '<circle class="drain" cx="50" cy="50" r="46"></circle>' +
+      '</svg>';
+    const face = el('div', 'face', initials(seat.name));
+    const dealer = el('div', 'dealer-icon', 'D');
+    dealer.style.display = 'none';
+    avatar.append(face, dealer);
+
     const plate = el('div', 'plate');
     const name = el('div', 'name');
     const stack = el('div', 'stack');
+    const stackValue = el('span', '', '0');
+    stack.append(el('span', 'chip-icon'), stackValue);
     plate.append(name, stack);
-
-    const dealer = el('div', 'dealer-btn', 'D');
-    dealer.style.display = 'none';
 
     const badge = el('div', 'badge');
     badge.style.display = 'none';
 
-    seatEl.append(hole, plate, dealer, badge);
+    seatEl.append(hole, avatar, plate, badge);
     els.seatLayer.appendChild(seatEl);
 
     // 下注筹码摆在座位和桌心之间的位置
     const chip = el('div', 'bet-chip');
-    chip.style.setProperty('--x', `${pos.x + (50 - pos.x) * 0.44}%`);
-    chip.style.setProperty('--y', `${pos.y + (50 - pos.y) * 0.44}%`);
+    const betValue = el('span', '', '');
+    chip.append(el('span', 'chip-icon'), betValue);
+    chip.style.setProperty('--x', `${pos.x + (50 - pos.x) * BET_OFFSET}%`);
+    chip.style.setProperty('--y', `${pos.y + (50 - pos.y) * BET_OFFSET}%`);
     chip.style.display = 'none';
     els.chipLayer.appendChild(chip);
 
-    seatEls.push({ root: seatEl, hole, name, stack, badge, chip, dealer, pos });
+    seatEls.push({
+      root: seatEl,
+      hole,
+      name,
+      stackValue,
+      badge,
+      chip,
+      betValue,
+      dealer,
+      pos,
+      holeSig: null,
+    });
   }
 }
 
@@ -158,28 +195,43 @@ function revealFor(seat) {
 
 function renderSeats() {
   const winners = new Set((state.result?.winners ?? []).map((w) => w.seat));
+  const acting = isHandOver() ? null : state.toAct;
 
   for (const seat of state.seats) {
     const ui = seatEls[seat.index];
     if (!ui) continue;
 
     ui.name.textContent = seat.isHuman ? `${seat.name}（你）` : seat.name;
-    ui.stack.textContent = String(seat.stack);
+    ui.stackValue.textContent = String(seat.stack);
     ui.root.classList.toggle('hero', seat.isHuman);
-    ui.root.classList.toggle('turn', state.toAct === seat.index && !isHandOver());
+    ui.root.classList.toggle('acting', acting === seat.index);
     ui.root.classList.toggle('winner', winners.has(seat.index) && isHandOver());
     ui.root.classList.toggle('out', seat.inHand && seat.folded);
 
-    ui.dealer.style.display = state.buttonSeat === seat.index && seat.inHand ? 'grid' : 'none';
+    if (acting === seat.index) {
+      // 计时环的时长：机器人 0.9 秒，轮到自己给足思考时间
+      ui.root.style.setProperty('--turn-ms', seat.isHuman ? '30000ms' : '900ms');
+    }
 
-    // 底牌
-    ui.hole.innerHTML = '';
-    if (seat.inHand) {
-      const show = revealFor(seat);
-      for (const card of seat.hole) {
-        ui.hole.appendChild(cardEl(card, { faceDown: !show }));
+    ui.dealer.style.display =
+      state.buttonSeat === seat.index && seat.inHand ? 'grid' : 'none';
+
+    // 底牌：内容没变就不重建，避免每次行动都重放动画
+    const show = seat.inHand && revealFor(seat);
+    const sig = seat.inHand
+      ? `${state.handNumber}|${show ? 1 : 0}|${seat.hole.join(',')}`
+      : 'out';
+    if (sig !== ui.holeSig) {
+      ui.holeSig = sig;
+      ui.hole.innerHTML = '';
+      if (seat.inHand) {
+        for (const card of seat.hole) {
+          const node = cardEl(card, { faceDown: !show });
+          if (show && state.phase === PHASES.HAND_OVER) node.classList.add('dealt');
+          ui.hole.appendChild(node);
+        }
+        while (ui.hole.childElementCount < 2) ui.hole.appendChild(cardSlot());
       }
-      while (ui.hole.childElementCount < 2) ui.hole.appendChild(cardSlot());
     }
 
     // 状态徽标
@@ -199,7 +251,7 @@ function renderSeats() {
 
     // 桌面上的下注筹码
     if (seat.streetBet > 0) {
-      ui.chip.textContent = String(seat.streetBet);
+      ui.betValue.textContent = String(seat.streetBet);
       ui.chip.style.display = 'flex';
     } else {
       ui.chip.style.display = 'none';
@@ -210,6 +262,21 @@ function renderSeats() {
 // ---------------------------------------------------------------------------
 // 牌桌中央
 // ---------------------------------------------------------------------------
+
+let boardSlots = [];
+/** 记录每个牌位当前画的是哪张牌，用来判断要不要重建（不闪烁的关键）。 */
+const boardRendered = [null, null, null, null, null];
+
+function buildBoard() {
+  els.community.innerHTML = '';
+  boardSlots = [];
+  for (let i = 0; i < 5; i++) {
+    const slot = el('div', 'board-slot');
+    els.community.appendChild(slot);
+    boardSlots.push(slot);
+    boardRendered[i] = null;
+  }
+}
 
 function renderBoard() {
   els.pot.textContent = String(totalPot(state));
@@ -222,10 +289,26 @@ function renderBoard() {
           : '本手结束'
         : STREET_NAMES[state.phase] ?? '';
 
-  els.community.innerHTML = '';
-  for (const card of state.board) els.community.appendChild(cardEl(card, { board: true }));
-  while (els.community.childElementCount < 5) {
-    els.community.appendChild(cardSlot(true));
+  for (let i = 0; i < 5; i++) {
+    const card = state.board[i];
+
+    if (card === undefined) {
+      // 新的一手：把这个牌位清空
+      if (boardRendered[i] !== null) {
+        boardSlots[i].innerHTML = '';
+        boardRendered[i] = null;
+      }
+      continue;
+    }
+
+    // 已经是这张牌了 —— 什么都不做，元素不动、动画就不会重放
+    if (boardRendered[i] === card) continue;
+
+    boardSlots[i].innerHTML = '';
+    const node = cardEl(card, { board: true });
+    node.classList.add('dealt');
+    boardSlots[i].appendChild(node);
+    boardRendered[i] = card;
   }
 }
 
@@ -336,7 +419,7 @@ function renderActionBar() {
   const row = el('div', 'btn-row');
 
   if (betPanel.open) {
-    const cancel = el('button', 'btn', '取消');
+    const cancel = el('button', 'btn neutral', '取消');
     cancel.type = 'button';
     cancel.addEventListener('click', () => {
       betPanel.open = false;
@@ -361,7 +444,7 @@ function renderActionBar() {
   fold.type = 'button';
   fold.addEventListener('click', () => humanAct(ACTION_TYPES.FOLD));
 
-  const call = el('button', 'btn');
+  const call = el('button', 'btn call');
   call.type = 'button';
   if (legal.canCheck) {
     call.append(el('span', '', '过牌'));
@@ -598,6 +681,7 @@ function bind() {
 }
 
 function boot() {
+  buildBoard();
   buildSeats();
   bind();
   newHand();

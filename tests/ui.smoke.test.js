@@ -227,3 +227,47 @@ test('点按钮能真的推进牌局', () => {
 
   debug.stop();
 });
+
+// 回归测试：公共牌曾经每有人行动就被重建，导致牌面上的入场动画反复重放，
+// 视觉上就是中间那块一直在闪。修法是只在牌真的变化时才动 DOM。
+test('重绘不会重建已有的公共牌', () => {
+  debug.stop();
+
+  let reachedFlop = false;
+  for (let attempt = 0; attempt < 15 && !reachedFlop; attempt++) {
+    debug.newHand();
+    let guard = 0;
+    while (!debug.isHandOver() && guard++ < 400) {
+      if (debug.getState().board.length >= 3) {
+        reachedFlop = true;
+        break;
+      }
+      const state = debug.getState();
+      const actor = state.seats[state.toAct];
+      if (actor.isHuman) {
+        const legal = debug.legal();
+        debug.humanAct(legal.canCheck ? 'check' : 'call');
+      } else if (!debug.botAct()) {
+        break;
+      }
+    }
+  }
+  assert.ok(reachedFlop, '这么多手牌里应该至少有一次看到翻牌');
+
+  const community = byId.get('community');
+  const snapshot = community.children.map((slot) => slot.children[0]);
+  assert.equal(snapshot.filter(Boolean).length, 3, '翻牌应该是 3 张');
+
+  // 连着重绘两次，节点身份必须完全不变（重建就意味着动画会重放）
+  debug.render();
+  debug.render();
+
+  const after = community.children.map((slot) => slot.children[0]);
+  for (let i = 0; i < 5; i++) {
+    assert.equal(after[i], snapshot[i], `第 ${i} 张公共牌的 DOM 节点不该被重建`);
+  }
+
+  debug.stop();
+  debug.newHand();
+  debug.stop();
+});
