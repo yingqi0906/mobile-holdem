@@ -1,11 +1,15 @@
 /**
- * Service Worker：让这个网页可以"装到主屏"并离线打开。
+ * Service Worker：让这个网页能"装到主屏"并且离线可玩。
  *
- * 单机版没有任何后端请求，所以策略很简单：静态资源全部走缓存优先，
- * 后台顺便更新缓存。改样式后如果没生效，把 CACHE 版本号 +1 即可。
+ * 策略是「网络优先 + 缓存兜底」，而不是常见的缓存优先。
+ * 原因：这是个几十 KB 的游戏，走网络的开销可以忽略，但缓存优先会让
+ * 改完代码之后老用户一直看到旧版本 —— 改样式时踩过一次这个坑。
+ *
+ * 联机时：每次都取最新，顺便刷新缓存。
+ * 断网时：回退到缓存，游戏照样能玩。
  */
 
-const CACHE = 'holdem-v1';
+const CACHE = 'holdem-v2';
 
 const ASSETS = [
   './',
@@ -46,18 +50,26 @@ self.addEventListener('fetch', (event) => {
   if (new URL(request.url).origin !== self.location.origin) return;
 
   event.respondWith(
-    caches.match(request).then((cached) => {
-      if (cached) return cached;
-      return fetch(request)
-        .then((response) => {
+    fetch(request)
+      .then((response) => {
+        if (response.ok) {
           const copy = response.clone();
           caches
             .open(CACHE)
             .then((cache) => cache.put(request, copy))
             .catch(() => {});
-          return response;
-        })
-        .catch(() => caches.match('./index.html'));
-    })
+        }
+        return response;
+      })
+      .catch(async () => {
+        const cached = await caches.match(request);
+        if (cached) return cached;
+        const shell = await caches.match('./index.html');
+        if (shell) return shell;
+        return new Response('离线，且本地没有缓存。', {
+          status: 503,
+          headers: { 'content-type': 'text/plain; charset=utf-8' },
+        });
+      })
   );
 });
