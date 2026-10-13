@@ -50,6 +50,7 @@ class Cdp {
     this.ws = ws;
     this.seq = 0;
     this.pending = new Map();
+    this.errors = [];
   }
 
   static async connect(wsUrl) {
@@ -61,6 +62,15 @@ class Cdp {
     const client = new Cdp(ws);
     ws.addEventListener('message', (event) => {
       const msg = JSON.parse(event.data);
+      // 页面的 JS 报错也收集起来 —— 白屏的时候这是唯一的线索
+      if (msg.method === 'Runtime.exceptionThrown') {
+        const d = msg.params.exceptionDetails;
+        client.errors.push(d.exception?.description ?? d.text ?? '未知异常');
+      } else if (msg.method === 'Runtime.consoleAPICalled' && msg.params.type === 'error') {
+        client.errors.push(
+          msg.params.args.map((a) => a.value ?? a.description ?? '').join(' ')
+        );
+      }
       const resolve = client.pending.get(msg.id);
       if (resolve) {
         client.pending.delete(msg.id);
@@ -323,6 +333,7 @@ async function main() {
     mobile: true,
   });
   await cdp.send('Page.enable');
+  await cdp.send('Runtime.enable');
   await cdp.send('Page.navigate', { url });
   await sleep(2200);
 
@@ -361,6 +372,11 @@ async function main() {
 
   const report = await cdp.eval(MEASURE);
   console.log(JSON.stringify(report, null, 2));
+
+  if (cdp.errors.length) {
+    console.error('\n页面报错：');
+    for (const err of [...new Set(cdp.errors)]) console.error('  - ' + err.split('\n')[0]);
+  }
 
   cdp.ws.close();
   chrome.kill();
