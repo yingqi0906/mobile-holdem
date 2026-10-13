@@ -412,12 +412,27 @@ test('输光后自动补码会让玩家看见，并计入累计买入', () => {
   // 打开筹码面板，累计买入应该已经翻倍
   byId.get('btn-chips').dispatch('click');
   const body = byId.get('chip-body');
-  assert.ok(body.textContent.includes('累计买入'), '面板里应该有累计买入');
-  assert.ok(body.textContent.includes('400'), `累计买入应该是两次买入：${body.textContent}`);
-  assert.ok(body.textContent.includes('净变化'), '面板里应该有净变化');
+  assert.ok(body.textContent.includes('400'), `应该记到两次买入共 400：${body.textContent}`);
+
+  // 面板要列出所有人，不只是自己
+  const legend = findFirst(body, (n) => n.classList.contains('chip-legend'));
+  assert.ok(legend, '应该有玩家明细表');
+  assert.equal(legend.children.length, 7, '一行表头 + 六个玩家');
+  for (const seat of debug.getState().seats) {
+    assert.ok(
+      body.textContent.includes(seat.name),
+      `面板里应该有 ${seat.name}：${body.textContent}`
+    );
+  }
 
   const chart = findFirst(body, (n) => n.classList.contains('chip-chart'));
   assert.ok(chart, '应该有走势图容器');
+  assert.ok(chart.innerHTML.includes('<svg'), '走势图应该是 SVG');
+  assert.equal(
+    (chart.innerHTML.match(/<polyline/g) ?? []).length,
+    6,
+    '六个玩家应该有六条线'
+  );
 
   debug.stop();
   debug.newHand();

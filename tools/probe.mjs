@@ -194,6 +194,15 @@ const MEASURE = `(() => {
   document.querySelectorAll('body *').forEach((el) => {
     const b = el.getBoundingClientRect();
     if (b.width <= 0 || b.height <= 0) return;
+    // 滚动容器里的内容超出视口是正常的（可以滚出来），不算布局问题
+    let p = el.parentElement;
+    let scrollable = false;
+    while (p && p !== document.body) {
+      const oy = getComputedStyle(p).overflowY;
+      if (oy === 'auto' || oy === 'scroll') { scrollable = true; break; }
+      p = p.parentElement;
+    }
+    if (scrollable) return;
     if (b.left < -1 || b.right > vw + 1 || b.top < -1 || b.bottom > vh + 1) {
       out.offscreen.push({ cls: typeof el.className === 'string' && el.className ? el.className : el.tagName, ...rect(el) });
     }

@@ -1117,31 +1117,76 @@ body {
 
 /* ------------------------------------------------------------ 筹码面板 */
 
-.chip-stats {
+.chip-legend {
+  margin: 12px 0 0;
+  padding: 0 16px;
+  list-style: none;
+  font-size: 12px;
+}
+
+#chip-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.chip-legend li {
   display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 7px 12px;
-  margin: 0;
-  padding: 4px 16px 0;
-  font-size: 13px;
-}
-
-.chip-stats dt {
-  color: var(--muted);
-}
-
-.chip-stats dd {
-  margin: 0;
-  text-align: right;
-  font-weight: 700;
+  grid-template-columns: 12px 1fr auto auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   font-variant-numeric: tabular-nums;
 }
 
-.chip-stats dd.up {
+.chip-legend li.head {
+  padding-bottom: 4px;
+  font-size: 11px;
+  color: rgba(238, 244, 240, 0.4);
+  border-bottom-color: rgba(255, 255, 255, 0.11);
+}
+
+.chip-legend .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  justify-self: center;
+}
+
+.chip-legend .who {
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chip-legend li.me .who {
+  color: var(--gold);
+}
+
+.chip-legend .buyin {
+  color: var(--muted);
+  text-align: right;
+}
+
+.chip-legend .stack {
+  font-weight: 700;
+  text-align: right;
+}
+
+.chip-legend .net {
+  min-width: 46px;
+  font-weight: 800;
+  text-align: right;
+  color: rgba(238, 244, 240, 0.5);
+}
+
+.chip-legend .net.up {
   color: #7ce0a7;
 }
 
-.chip-stats dd.down {
+.chip-legend .net.down {
   color: #f19a92;
 }
 

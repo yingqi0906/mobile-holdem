@@ -87,6 +87,24 @@ export function createTable(options = {}) {
   return {
     config,
     seats,
+    /**
+     * 整局（session）的账本。
+     *
+     * 刻意放在引擎状态里而不是界面里：以后做联机时，服务端跑的是同一套
+     * 引擎，这份账本可以直接随状态同步给每个客户端，不需要再写一份统计逻辑。
+     */
+    session: {
+      hands: 0,
+      seats: seats.map((seat) => ({
+        index: seat.index,
+        buyIn: config.startingStack,
+        history: [config.startingStack],
+        dealtIn: 0,
+        wins: 0,
+        peak: config.startingStack,
+        low: config.startingStack,
+      })),
+    },
     handNumber: 0,
     // 初始置为最后一个座位，开第一手时按钮会移到 0 号位。
     buttonSeat: seatCount - 1,
@@ -205,6 +223,7 @@ export function startHand(prev, rng = defaultRng()) {
     for (const seat of state.seats) {
       if (seat.stack <= 0) {
         seat.stack = state.config.startingStack;
+        state.session.seats[seat.index].buyIn += seat.stack;
         state.events.push({ type: 'rebuy', seat: seat.index, amount: seat.stack });
         state.log.push({
           hand: state.handNumber + 1,
@@ -240,6 +259,7 @@ export function startHand(prev, rng = defaultRng()) {
     seat.hasActed = false;
     seat.lastAction = null;
     seat.startStack = seat.stack;
+    if (seat.inHand) state.session.seats[seat.index].dealtIn += 1;
   }
 
   // 按钮移到下一个能打的座位
@@ -397,7 +417,27 @@ function finishByFold(state, winner) {
     hand: state.handNumber,
     text: `其他人都弃牌，${winner.name} 赢得 ${total}`,
   });
+  recordSessionHand(state);
   return state;
+}
+
+/**
+ * 一手牌结束后把每个人的筹码记进账本。
+ * 只存"每手之后的余额"，不存每一笔下注 —— 后者是回放数据，
+ * 体量大得多，而且当前的走势图用不上。
+ */
+function recordSessionHand(state) {
+  state.session.hands += 1;
+  for (const seat of state.seats) {
+    const stats = state.session.seats[seat.index];
+    stats.history.push(seat.stack);
+    if (stats.history.length > 200) stats.history.shift();
+    stats.peak = Math.max(stats.peak, seat.stack);
+    stats.low = Math.min(stats.low, seat.stack);
+  }
+  for (const winner of state.result?.winners ?? []) {
+    state.session.seats[winner.seat].wins += 1;
+  }
 }
 
 function showdown(state) {
@@ -463,6 +503,7 @@ function showdown(state) {
     (w) => `${state.seats[w.seat].name} 赢得 ${w.amount}（${evals.get(w.seat).description}）`
   );
   state.log.push({ hand: state.handNumber, text: lines.join('；') });
+  recordSessionHand(state);
   return state;
 }
 

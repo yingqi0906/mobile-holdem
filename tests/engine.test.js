@@ -282,3 +282,51 @@ function startHandFor(state, rng, allowEnd = false) {
   }
   return next;
 }
+
+test('引擎账本记录每个人的筹码走势', () => {
+  const rng = createSeededRng(41);
+  let state = attachBots(newTable(), createSeededRng(41));
+
+  for (let i = 0; i < 6; i++) {
+    state = startHandFor(state, rng, true);
+    if (state.phase === PHASES.IDLE) break;
+    state = playToEnd(state, rng);
+  }
+
+  assert.ok(state.session.hands > 0, '应该记录了打过的手数');
+  for (const stats of state.session.seats) {
+    assert.equal(
+      stats.history.length,
+      state.session.hands + 1,
+      '账本应该是「起始一个点 + 每手一个点」'
+    );
+    assert.equal(stats.buyIn, 1000, '没补过码的话买入就是起始筹码');
+    assert.ok(stats.peak >= stats.low, '最高不该低于最低');
+    assert.equal(
+      stats.history[stats.history.length - 1],
+      state.seats[stats.index].stack,
+      '账本最后一个点应该等于当前筹码'
+    );
+  }
+});
+
+test('自动补码会记进引擎账本', () => {
+  const rng = createSeededRng(43);
+  const table = createTable({
+    smallBlind: 1,
+    bigBlind: 2,
+    startingStack: 200,
+    seatCount: 6,
+    autoRebuy: true,
+  });
+  let state = startHandFor(table, rng);
+  state = playToEnd(state, rng);
+
+  // 把 2 号座位打光，下一手应该补码
+  state.seats[2].stack = 0;
+  const beforeBuyIn = state.session.seats[2].buyIn;
+  state = startHandFor(state, rng);
+
+  assert.equal(state.session.seats[2].buyIn, beforeBuyIn + 200, '补码要计进买入');
+  assert.ok(state.seats[2].stack >= 198, '补码后扣掉盲注也应该是满仓附近');
+});

@@ -21,7 +21,7 @@ import { bestFive } from '../core/evaluator.js';
 import { createCryptoRng } from '../core/rng.js';
 
 /** 每次发布时改一下这个号，界面上能看到，方便确认自己加载的是哪一版。 */
-const BUILD = 'v0.8';
+const BUILD = 'v0.9';
 
 const CONFIG = {
   smallBlind: 1,
@@ -87,21 +87,11 @@ let resultTimer = null;
 let resultShownFor = -1;
 let renderedPhase = null;
 let betPanel = { open: false, value: 0 };
-/** 自己的筹码走势：每手结束后记一次，用来画曲线。 */
-let chipHistory = [CONFIG.startingStack];
-let chipHistoryHand = 0;
-/** 累计投入（初次买入 + 每次自动补码），净盈亏就是拿它算的。 */
-let totalInvested = CONFIG.startingStack;
 let toastTimer = null;
 const seatEls = [];
 
-/** 每手结束后记一次自己的筹码，供走势图使用。 */
-function recordChipHistory() {
-  if (!isHandOver() || chipHistoryHand === state.handNumber) return;
-  chipHistoryHand = state.handNumber;
-  chipHistory.push(humanSeat(state).stack);
-  if (chipHistory.length > 300) chipHistory.shift();
-}
+/** 每个座位一条线，自己那条用金色。数据来自引擎的 session 账本。 */
+const SEAT_COLORS = ['#f2c53d', '#7ce0a7', '#6db3f2', '#f19a92', '#c79af2', '#f2a65a'];
 
 /** 从顶部飘一条提示，比如破产补码。 */
 function showToast(text) {
@@ -112,30 +102,50 @@ function showToast(text) {
 }
 
 /**
- * 把一串数值画成折线面积图。
+ * 把所有座位的筹码画成一张多线图 —— 一眼能看出谁在赢、谁在输。
  *
- * 用 innerHTML 拼 SVG 字符串而不是 createElementNS —— 这样连测试用的
+ * 用 innerHTML 拼 SVG 字符串而不是 createElementNS：这样连测试用的
  * DOM 桩也能跑通，不需要额外支持命名空间。
  */
-function sparklineSvg(values) {
-  if (values.length < 2) return '';
-  const w = 300;
-  const h = 72;
+function chipChartSvg(series, options = {}) {
+  const w = options.width ?? 300;
+  const h = options.height ?? 96;
   const pad = 8;
-  const min = Math.min(...values);
-  const max = Math.max(...values);
+  const usable = series.filter((s) => s.values.length >= 2);
+  if (usable.length === 0) return '';
+
+  const all = usable.flatMap((s) => s.values);
+  const min = Math.min(...all);
+  const max = Math.max(...all);
   const span = Math.max(1, max - min);
-  const x = (i) => pad + (i / (values.length - 1)) * (w - pad * 2);
+  const steps = Math.max(...usable.map((s) => s.values.length)) - 1;
+  const x = (i) => pad + (i / Math.max(1, steps)) * (w - pad * 2);
   const y = (v) => h - pad - ((v - min) / span) * (h - pad * 2);
-  const points = values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
-  const rising = values[values.length - 1] >= values[0];
-  const stroke = rising ? '#7ce0a7' : '#f19a92';
+
+  const lines = usable
+    .map((s) => {
+      const points = s.values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+      const width = s.emphasis ? 2.6 : 1.6;
+      const opacity = s.emphasis ? 1 : 0.72;
+      return (
+        `<polyline points="${points}" fill="none" stroke="${s.color}" ` +
+        `stroke-width="${width}" opacity="${opacity}" ` +
+        `stroke-linejoin="round" stroke-linecap="round"/>`
+      );
+    })
+    .join('');
+
+  // 虚线是买入线，掉到它下面就是在亏
+  const baseY = y(usable[0].values[0]).toFixed(1);
+  const baseline =
+    `<line x1="${pad}" y1="${baseY}" x2="${w - pad}" y2="${baseY}" ` +
+    `stroke="rgba(255,255,255,0.18)" stroke-width="1" stroke-dasharray="3 4"/>`;
+
   return (
     `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" class="spark" aria-hidden="true">` +
-    `<polygon points="${pad},${h - pad} ${points} ${w - pad},${h - pad}" fill="${stroke}" opacity="0.15"/>` +
-    `<polyline points="${points}" fill="none" stroke="${stroke}" stroke-width="2" ` +
-    `stroke-linejoin="round" stroke-linecap="round"/>` +
-    `</svg>`
+    baseline +
+    lines +
+    '</svg>'
   );
 }
 
@@ -399,7 +409,8 @@ function renderHud() {
   els.build.textContent = BUILD;
 
   // 常驻显示"本局净变化" —— 座位上那块筹码数字看不出这个
-  const net = humanSeat(state).stack - totalInvested;
+  const hero = humanSeat(state);
+  const net = hero.stack - state.session.seats[hero.index].buyIn;
   els.net.textContent = `${net > 0 ? '+' : ''}${net}`;
   els.btnChips.classList.toggle('up', net > 0);
   els.btnChips.classList.toggle('down', net < 0);
@@ -620,36 +631,58 @@ function renderLog() {
   els.logList.scrollTop = els.logList.scrollHeight;
 }
 
-/** 筹码面板：当前值、净变化、买卖次数，加上一条走势曲线。 */
+/** 筹码面板：所有人的走势曲线 + 每人一行的明细。 */
 function renderChipPanel() {
   if (els.chippanel.classList.contains('hidden')) return;
 
-  const hero = humanSeat(state);
-  const net = hero.stack - totalInvested;
-  const peak = Math.max(...chipHistory);
-  const low = Math.min(...chipHistory);
+  const heroIndex = humanSeat(state).index;
+  const start = state.config.startingStack;
+
+  const series = state.session.seats.map((stats) => ({
+    color: SEAT_COLORS[stats.index % SEAT_COLORS.length],
+    values: stats.history,
+    emphasis: stats.index === heroIndex,
+  }));
 
   els.chipBody.innerHTML = '';
 
-  const stats = el('dl', 'chip-stats');
-  const addRow = (label, value, tone) => {
-    stats.appendChild(el('dt', '', label));
-    stats.appendChild(el('dd', tone ?? '', value));
-  };
-  addRow('当前筹码', String(hero.stack));
-  addRow('本局净变化', `${net > 0 ? '+' : ''}${net}`, net > 0 ? 'up' : net < 0 ? 'down' : '');
-  addRow('累计买入', String(totalInvested));
-  addRow('最高 / 最低', `${peak} / ${low}`);
-  addRow('已打手数', String(Math.max(0, chipHistory.length - 1)));
-  els.chipBody.appendChild(stats);
-
   const chart = el('div', 'chip-chart');
-  chart.innerHTML = sparklineSvg(chipHistory);
+  chart.innerHTML = chipChartSvg(series);
   els.chipBody.appendChild(chart);
 
+  const legend = el('ul', 'chip-legend');
+  const head = el('li', 'head');
+  head.append(
+    el('span', ''),
+    el('span', '', '玩家'),
+    el('span', '', '买入'),
+    el('span', '', '筹码'),
+    el('span', '', '净变化')
+  );
+  legend.appendChild(head);
+
+  for (const seat of state.seats) {
+    const stats = state.session.seats[seat.index];
+    const net = seat.stack - stats.buyIn;
+    const li = el('li', seat.index === heroIndex ? 'me' : '');
+
+    const dot = el('span', 'dot');
+    dot.style.setProperty('background', SEAT_COLORS[seat.index % SEAT_COLORS.length]);
+
+    li.append(
+      dot,
+      el('span', 'who', seat.index === heroIndex ? '你' : seat.name),
+      el('span', 'buyin', stats.buyIn > start ? String(stats.buyIn) : '—'),
+      el('span', 'stack', String(seat.stack)),
+      el('span', `net ${net > 0 ? 'up' : net < 0 ? 'down' : ''}`, `${net > 0 ? '+' : ''}${net}`)
+    );
+    legend.appendChild(li);
+  }
+  els.chipBody.appendChild(legend);
+
   const note =
-    `每个点是打完一手之后的筹码。起始买入 ${CONFIG.startingStack}，` +
-    '输光会在下一手自动补入同样的数额。';
+    `每手结束后记一次筹码。买入一列不是「—」说明输光过、自动补过码；` +
+    `净变化 = 当前筹码 − 累计买入。共打了 ${state.session.hands} 手。`;
   els.chipBody.appendChild(el('p', 'chip-note', note));
 }
 
@@ -802,7 +835,6 @@ function render() {
     }
   }
 
-  recordChipHistory();
   renderHud();
   renderBoard();
   renderSeats();
@@ -872,8 +904,8 @@ function newHand() {
   // 破产补码必须让玩家看见，否则"我的筹码怎么突然变多了"没法解释
   for (const event of state.events) {
     if (event.type === 'rebuy' && state.seats[event.seat].isHuman) {
-      totalInvested += event.amount;
-      showToast(`筹码输光了，自动补入 ${event.amount}（累计买入 ${totalInvested}）`);
+      const buyIn = state.session.seats[event.seat].buyIn;
+      showToast(`筹码输光了，自动补入 ${event.amount}（累计买入 ${buyIn}）`);
     }
   }
 
@@ -895,9 +927,6 @@ function hardReset() {
   betPanel.open = false;
   renderedPhase = null;
   resultShownFor = -1;
-  chipHistory = [CONFIG.startingStack];
-  chipHistoryHand = 0;
-  totalInvested = CONFIG.startingStack;
   state = attachBots(createTable(CONFIG), rng);
   buildSeats();
   render();
