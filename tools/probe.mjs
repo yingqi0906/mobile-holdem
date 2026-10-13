@@ -150,6 +150,10 @@ const MEASURE = `(() => {
   }
   const betValue = document.querySelector('.bet-head .value');
   if (betValue) out.betValue = betValue.textContent;
+  const sheetEl = document.querySelector('.result-sheet');
+  if (sheetEl) out.resultText = sheetEl.innerText;
+  const listEl = document.querySelector('.showdown-list');
+  if (listEl) out.showdownRows = [...listEl.children].map((li) => li.innerText.replace(/\\n/g, ' | '));
   document.querySelectorAll('.seat').forEach((el, i) => {
     out.seats.push({
       i, ...rect(el),
