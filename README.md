@@ -7,9 +7,24 @@
 
 ## 更新线上版本
 
-平时直接 `git push` 即可，GitHub Pages 会自动重新构建。如果所在网络访问不了
-`github.com`（部分网络下 443 端口不通），可以改走 REST API 发布 —— 效果一样，
-而且会顺带把本地分支对齐到远端提交：
+改完代码直接 `git push`，GitHub Pages 会自动重新构建，一两分钟后生效。
+
+如果网络需要代理才能访问 GitHub，注意 **git 不会自动读取 Windows 的「系统代理」设置**，
+必须显式告诉它，否则只会看到 `Recv failure: Connection was reset`：
+
+```powershell
+$env:HTTPS_PROXY = 'http://127.0.0.1:7897'   # 端口按你代理软件实际的监听端口改
+git push
+```
+
+想省事就写进仓库配置（只影响这个仓库，不动全局）：
+
+```bash
+git config http.proxy http://127.0.0.1:7897
+```
+
+万一某天代理也不通，还有个完全不依赖 `github.com` 的兜底方案 —— 直接走
+REST API 发布，而且会顺带把本地分支对齐到远端提交：
 
 ```bash
 node tools/deploy-github.mjs <用户名>/mobile-holdem --token-file <令牌文件路径>
