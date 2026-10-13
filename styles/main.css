@@ -278,7 +278,8 @@ body {
 .seat {
   position: absolute;
   left: var(--x);
-  top: var(--y);
+  /* --dy 让 CSS 能在不改动内联坐标的前提下微调座位位置 */
+  top: calc(var(--y) + var(--dy, 0%));
   transform: translate(-50%, -50%);
   width: 94px;
   display: flex;
@@ -478,6 +479,11 @@ body {
   width: 108px;
 }
 
+/* 加注面板展开时（牌桌被压矮），把自己往上收，避免名牌被面板挡住 */
+.table-area.compact .seat.hero {
+  --dy: -6%;
+}
+
 /* ---------------------------------------------------------- 下注筹码 */
 
 .bet-chip {
@@ -514,6 +520,9 @@ body {
 /* -------------------------------------------------------------- 操作栏 */
 
 .actionbar {
+  /* 定位 + z-index：否则牌桌里定位的座位会画到操作栏上面来 */
+  position: relative;
+  z-index: 2;
   flex: none;
   padding: 9px 10px calc(9px + var(--safe-b));
   background: linear-gradient(#0a1512, #050b09);
@@ -705,11 +714,10 @@ body {
   position: fixed;
   inset: 0;
   display: grid;
-  align-items: flex-end;
-  justify-items: center;
-  padding: 0;
-  background: rgba(2, 7, 5, 0.68);
-  backdrop-filter: blur(2px);
+  place-items: center;
+  padding: 20px;
+  background: rgba(2, 7, 5, 0.72);
+  backdrop-filter: blur(4px);
   z-index: 30;
 }
 
@@ -718,37 +726,41 @@ body {
   display: none;
 }
 
-/* --- 结算面板：从底部升起的卡片（GGPoker 风格）--- */
+/* --- 结算卡片 --- */
 
 .result-sheet {
-  width: 100%;
-  max-width: 620px;
-  padding: 16px 16px calc(14px + var(--safe-b));
-  border-radius: 20px 20px 0 0;
-  background: linear-gradient(#0f2418, #06120d);
-  border-top: 1px solid rgba(242, 197, 61, 0.32);
-  box-shadow: 0 -20px 54px rgba(0, 0, 0, 0.68);
-  animation: sheet-up 0.26s cubic-bezier(0.2, 0.9, 0.3, 1);
+  width: min(340px, 100%);
+  max-height: calc(100% - 8px);
+  overflow-y: auto;
+  padding: 20px 18px 16px;
+  border-radius: 20px;
+  text-align: center;
+  background: linear-gradient(#122a1c, #071410);
+  border: 1px solid rgba(242, 197, 61, 0.26);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.72);
+  animation: pop 0.22s ease;
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.94) translateY(10px);
+  }
 }
 
 .result-sheet.win {
-  border-top-color: rgba(88, 226, 148, 0.6);
+  border-color: rgba(88, 226, 148, 0.45);
 }
 
 .result-sheet.loss {
-  border-top-color: rgba(220, 90, 78, 0.55);
-}
-
-.result-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  border-color: rgba(220, 90, 78, 0.4);
 }
 
 .result-title {
-  font-size: 19px;
-  font-weight: 800;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--muted);
 }
 
 .result-sheet.win .result-title {
@@ -760,7 +772,7 @@ body {
 }
 
 .result-sub {
-  margin-top: 2px;
+  margin-top: 4px;
   font-size: 12px;
   color: var(--muted);
 }
@@ -768,10 +780,17 @@ body {
 .result-amount {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 29px;
+  justify-content: center;
+  gap: 8px;
+  margin: 4px 0 0;
+  font-size: 38px;
   font-weight: 900;
+  line-height: 1.1;
   font-variant-numeric: tabular-nums;
+}
+
+.result-amount span:last-child {
+  letter-spacing: -0.02em;
 }
 
 .result-amount.up {
@@ -783,13 +802,13 @@ body {
 }
 
 .result-amount .chip-icon {
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
 }
 
 .result-hand {
-  margin-top: 13px;
-  padding: 12px;
+  margin-top: 14px;
+  padding: 12px 10px;
   border-radius: 12px;
   background: rgba(0, 0, 0, 0.3);
   border: 1px solid var(--line);
@@ -806,7 +825,7 @@ body {
   display: flex;
   justify-content: center;
   gap: 5px;
-  --card-w: clamp(30px, 8.6vw, 42px);
+  --card-w: clamp(30px, 8.6vw, 38px);
 }
 
 .result-payouts {
@@ -814,6 +833,7 @@ body {
   padding: 0;
   list-style: none;
   font-size: 13px;
+  text-align: left;
 }
 
 .result-payouts li {
@@ -847,7 +867,9 @@ body {
 }
 
 .result-next {
-  margin-top: 14px;
+  flex: none;
+  width: 100%;
+  margin-top: 16px;
 }
 
 /* 赢家座位上飘出的筹码数字 */

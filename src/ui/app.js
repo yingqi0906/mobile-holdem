@@ -21,7 +21,7 @@ import { bestFive } from '../core/evaluator.js';
 import { createCryptoRng } from '../core/rng.js';
 
 /** 每次发布时改一下这个号，界面上能看到，方便确认自己加载的是哪一版。 */
-const BUILD = 'v0.4';
+const BUILD = 'v0.5';
 
 const CONFIG = {
   smallBlind: 10,
@@ -60,6 +60,7 @@ const els = {
   btnLog: document.getElementById('btn-log'),
   btnNew: document.getElementById('btn-new'),
   build: document.getElementById('hud-build'),
+  tableArea: document.getElementById('table-area'),
   pot: document.getElementById('pot-amount'),
   community: document.getElementById('community'),
   street: document.getElementById('street-label'),
@@ -345,6 +346,43 @@ function potSizedTarget(legal, fraction) {
   );
 }
 
+/**
+ * 快捷加注按钮。
+ *
+ * 翻牌前和翻牌后应该是两套逻辑：
+ *   翻牌前 —— 按「几个大盲」说话（2.5BB / 3BB），这是牌桌上的通用语言；
+ *             如果已经有人加注，就改成「几倍」再加。
+ *   翻牌后 —— 按底池比例（1/3 池、1/2 池、满池）才是标准说法。
+ */
+function betPresets(legal) {
+  const bb = state.config.bigBlind;
+  const fit = (v) => clamp(round5(v), legal.minRaiseTo, legal.maxRaiseTo);
+
+  if (state.phase === PHASES.PREFLOP) {
+    if (state.currentBet <= bb) {
+      return [
+        { label: '2.5BB', value: fit(bb * 2.5) },
+        { label: '3BB', value: fit(bb * 3) },
+        { label: '4BB', value: fit(bb * 4) },
+        { label: '全下', value: legal.maxRaiseTo },
+      ];
+    }
+    return [
+      { label: '2.5 倍', value: fit(state.currentBet * 2.5) },
+      { label: '3 倍', value: fit(state.currentBet * 3) },
+      { label: '4 倍', value: fit(state.currentBet * 4) },
+      { label: '全下', value: legal.maxRaiseTo },
+    ];
+  }
+
+  return [
+    { label: '⅓ 池', value: potSizedTarget(legal, 1 / 3) },
+    { label: '½ 池', value: potSizedTarget(legal, 0.5) },
+    { label: '满池', value: potSizedTarget(legal, 1) },
+    { label: '全下', value: legal.maxRaiseTo },
+  ];
+}
+
 function applyBetValue(legal, value) {
   betPanel.value = clamp(value, legal.minRaiseTo, legal.maxRaiseTo);
 }
@@ -365,23 +403,16 @@ function buildBetPanel(legal) {
   slider.value = String(betPanel.value);
 
   const presets = el('div', 'preset-row');
-  const makePreset = (text, compute) => {
-    const btn = el('button', 'preset', text);
+  for (const preset of betPresets(legal)) {
+    const btn = el('button', 'preset', preset.label);
     btn.type = 'button';
     btn.addEventListener('click', () => {
-      applyBetValue(legal, compute());
+      applyBetValue(legal, preset.value);
       slider.value = String(betPanel.value);
       syncPanel();
     });
-    return btn;
-  };
-
-  presets.append(
-    makePreset('½ 池', () => potSizedTarget(legal, 0.5)),
-    makePreset('¾ 池', () => potSizedTarget(legal, 0.75)),
-    makePreset('满池', () => potSizedTarget(legal, 1)),
-    makePreset('全下', () => legal.maxRaiseTo)
-  );
+    presets.appendChild(btn);
+  }
 
   function syncPanel() {
     const v = Number(slider.value);
@@ -405,6 +436,9 @@ function buildBetPanel(legal) {
 
 function renderActionBar() {
   els.actionbar.innerHTML = '';
+  // 加注面板展开时操作栏会长高、牌桌被压矮，这时把自己的座位往上收一点，
+  // 免得筹码名牌被面板盖住。
+  els.tableArea.classList.toggle('compact', betPanel.open);
 
   if (isHandOver()) {
     const row = el('div', 'btn-row');
@@ -530,21 +564,16 @@ function showResult() {
     `result-sheet ${delta > 0 ? 'win' : delta < 0 ? 'loss' : 'tie'}`
   );
 
-  // 顶部：结果 + 这一手的盈亏
-  const top = el('div', 'result-top');
-  const heading = el('div', 'result-heading');
-  heading.appendChild(
+  // 自上而下：结果 → 盈亏 → 说明 → 赢家的牌 → 派彩 → 下一手
+  sheet.appendChild(
     el('div', 'result-title', delta > 0 ? '你赢了' : delta < 0 ? '你输了' : '平手')
   );
-  heading.appendChild(
-    el('div', 'result-sub', result.type === 'fold' ? '其他人都弃牌' : '摊牌比大小')
-  );
-  top.appendChild(heading);
-
   const amount = el('div', `result-amount ${delta > 0 ? 'up' : delta < 0 ? 'down' : ''}`);
   amount.append(el('span', 'chip-icon'), el('span', '', `${delta > 0 ? '+' : ''}${delta}`));
-  top.appendChild(amount);
-  sheet.appendChild(top);
+  sheet.appendChild(amount);
+  sheet.appendChild(
+    el('div', 'result-sub', result.type === 'fold' ? '其他人都弃牌' : '摊牌比大小')
+  );
 
   // 亮出赢家的最佳五张 —— 摊牌时最想看的就是这个
   const winnerWithCards = result.winners.find((w) => shownOf(w.seat));

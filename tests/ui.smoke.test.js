@@ -341,3 +341,45 @@ function findFirst(node, predicate) {
   }
   return null;
 }
+
+test('翻牌前的快捷加注按钮按大盲计', () => {
+  debug.stop();
+
+  let seated = false;
+  for (let attempt = 0; attempt < 6 && !seated; attempt++) {
+    debug.newHand();
+    let guard = 0;
+    while (debug.getState().toAct !== 0 && guard++ < 60) {
+      if (!debug.botAct()) break;
+    }
+    if (debug.getState().toAct === 0) seated = true;
+  }
+  assert.ok(seated, '应该轮到玩家行动');
+
+  const bar = byId.get('actionbar');
+  const raise = bar
+    .findButtons()
+    .find((b) => b.textContent.includes('加注') || b.textContent.includes('下注'));
+  assert.ok(raise, '轮到自己时应该能加注');
+  raise.dispatch('click');
+
+  const labels = bar.findButtons().map((b) => b.textContent);
+  assert.ok(labels.includes('全下'), `快捷按钮里应该有全下，实际：${labels}`);
+
+  const state = debug.getState();
+  if (state.currentBet <= state.config.bigBlind) {
+    // 还没人加注：按大盲说话
+    for (const want of ['2.5BB', '3BB', '4BB']) {
+      assert.ok(labels.includes(want), `缺少 ${want}，实际：${labels}`);
+    }
+  } else {
+    // 已经有人加注：按倍数再加
+    for (const want of ['2.5 倍', '3 倍', '4 倍']) {
+      assert.ok(labels.includes(want), `缺少 ${want}，实际：${labels}`);
+    }
+  }
+
+  debug.stop();
+  debug.newHand();
+  debug.stop();
+});
