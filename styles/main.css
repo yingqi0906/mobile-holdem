@@ -101,7 +101,7 @@ body {
   color: var(--ink);
   font: inherit;
   font-size: 12px;
-  padding: 6px 12px;
+  padding: 6px 10px;
   border-radius: 999px;
   cursor: pointer;
 }
@@ -116,7 +116,7 @@ body {
   display: flex;
   align-items: center;
   gap: 5px;
-  padding: 5px 10px;
+  padding: 5px 9px;
   border-radius: 999px;
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.05);
@@ -1159,12 +1159,11 @@ body {
   }
 }
 
-/* HUD 上的版本号，用来确认自己加载的是哪一版 */
+/* 面板标题旁边的版本号，用来确认自己加载的是哪一版 */
 .build {
-  align-self: center;
-  margin-right: 2px;
   font-size: 11px;
-  color: rgba(238, 244, 240, 0.32);
+  font-weight: 500;
+  color: rgba(238, 244, 240, 0.38);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1347,4 +1346,100 @@ body {
 .toast.show {
   opacity: 1;
   transform: translate(-50%, 0);
+}
+
+/*
+ * 小屏紧凑模式。
+ *
+ * 320×568 这种屏幕（老款 iPhone SE、小屏安卓、分屏）上，常规尺寸会：
+ * 侧边座位被挤出屏幕、加注面板展开后自己的牌压到公共牌。
+ * 这里把所有尺寸收一档，并给 HUD / 操作栏减重。
+ */
+@media (max-width: 340px), (max-height: 620px) {
+  :root {
+    --card-w: clamp(18px, 5.4vw, 24px);
+    --board-card-w: clamp(30px, 9.6vw, 40px);
+    --avatar: clamp(28px, 8.6vw, 36px);
+  }
+
+  .hud {
+    padding: calc(var(--safe-t) + 6px) 10px 6px;
+    font-size: 11px;
+  }
+
+  .icon-btn {
+    padding: 5px 9px;
+    font-size: 11px;
+  }
+
+  .chip-badge {
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+
+  .seat {
+    width: 80px;
+    gap: 2px;
+  }
+
+  .seat.hero {
+    --card-w: clamp(22px, 7.4vw, 30px);
+    width: 92px;
+  }
+
+  .seat .plate {
+    padding: 2px 5px 3px;
+  }
+
+  .seat .name {
+    font-size: 9px;
+  }
+
+  .seat .stack {
+    font-size: 11px;
+  }
+
+  .seat .badge {
+    font-size: 9px;
+    padding: 1px 6px;
+  }
+
+  .board {
+    gap: 5px;
+  }
+
+  .pot-row {
+    font-size: 12px;
+  }
+
+  .actionbar {
+    padding: 7px 8px calc(7px + var(--safe-b));
+  }
+
+  .btn {
+    min-height: 46px;
+    font-size: 15px;
+  }
+
+  .btn small {
+    font-size: 10px;
+  }
+
+  .bet-panel {
+    padding: 10px;
+  }
+
+  .bet-head .value {
+    font-size: 20px;
+  }
+
+  .bet-slider {
+    height: 26px;
+    margin-bottom: 8px;
+  }
+
+  .preset {
+    padding: 8px 2px;
+    font-size: 11px;
+  }
 }

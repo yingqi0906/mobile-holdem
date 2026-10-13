@@ -21,7 +21,7 @@ import { bestFive } from '../core/evaluator.js';
 import { createCryptoRng } from '../core/rng.js';
 
 /** 每次发布时改一下这个号，界面上能看到，方便确认自己加载的是哪一版。 */
-const BUILD = 'v0.10';
+const BUILD = 'v0.11';
 
 const CONFIG = {
   smallBlind: 1,
@@ -61,7 +61,8 @@ const els = {
   btnNew: document.getElementById('btn-new'),
   btnChips: document.getElementById('btn-chips'),
   net: document.getElementById('hud-net'),
-  build: document.getElementById('hud-build'),
+  logBuild: document.getElementById('log-build'),
+  chipBuild: document.getElementById('chip-build'),
   tableArea: document.getElementById('table-area'),
   pot: document.getElementById('pot-amount'),
   community: document.getElementById('community'),
@@ -426,7 +427,9 @@ function renderHud() {
   const { smallBlind, bigBlind } = state.config;
   els.blinds.textContent = `盲注 ${smallBlind} / ${bigBlind}`;
   els.hand.textContent = `第 ${Math.max(state.handNumber, 1)} 手`;
-  els.build.textContent = BUILD;
+  // 版本号放在两个面板的标题旁边 —— 放在顶部会被挤掉（窄屏上实测过）
+  els.logBuild.textContent = BUILD;
+  els.chipBuild.textContent = BUILD;
 
   // 常驻显示"本局净变化" —— 座位上那块筹码数字看不出这个
   const hero = humanSeat(state);

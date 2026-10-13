@@ -25,8 +25,6 @@
           <span id="hud-blinds">盲注 1 / 2</span>
           <span class="dot">·</span>
           <span id="hud-hand">第 1 手</span>
-          <span class="dot">·</span>
-          <span id="hud-build" class="build"></span>
         </div>
         <div class="hud-actions">
           <button id="btn-chips" class="chip-badge" type="button" aria-label="筹码变化">
@@ -56,7 +54,7 @@
 
       <aside class="logpanel hidden" id="logpanel">
         <header class="log-head">
-          <h2>行动记录</h2>
+          <h2>行动记录 <span id="log-build" class="build"></span></h2>
           <button id="log-close" class="icon-btn" type="button">关闭</button>
         </header>
         <ol id="log-list"></ol>
@@ -64,7 +62,7 @@
 
       <aside class="logpanel hidden" id="chippanel">
         <header class="log-head">
-          <h2>筹码变化</h2>
+          <h2>筹码变化 <span id="chip-build" class="build"></span></h2>
           <button id="chip-close" class="icon-btn" type="button">关闭</button>
         </header>
         <div id="chip-body"></div>

@@ -174,6 +174,15 @@ const MEASURE = `(() => {
   if (chipPanelEl) out.chipText = chipPanelEl.innerText.replace(/\\n+/g, ' | ');
   const hudEl = document.querySelector('.hud');
   if (hudEl) out.hudText = hudEl.innerText.replace(/\\n+/g, ' ');
+  const infoEl = document.querySelector('.hud-info');
+  if (infoEl) {
+    out.hudInfo = {
+      ...rect(infoEl),
+      scrollW: infoEl.scrollWidth,
+      clientW: infoEl.clientWidth,
+      clipped: infoEl.scrollWidth > infoEl.clientWidth,
+    };
+  }
   const listEl = document.querySelector('.showdown-list');
   if (listEl) out.showdownRows = [...listEl.children].map((li) => li.innerText.replace(/\\n/g, ' | '));
   const badges = [...document.querySelectorAll('.seat .badge')]
@@ -223,8 +232,11 @@ const MEASURE = `(() => {
       p = p.parentElement;
     }
     if (scrollable) return;
+    // 装饰性元素（座位光环、飘字）本来就会播到视口外面，不算布局问题
+    const cls = typeof el.className === 'string' ? el.className : '';
+    if (cls.includes('seat-flash') || cls.includes('win-delta')) return;
     if (b.left < -1 || b.right > vw + 1 || b.top < -1 || b.bottom > vh + 1) {
-      out.offscreen.push({ cls: typeof el.className === 'string' && el.className ? el.className : el.tagName, ...rect(el) });
+      out.offscreen.push({ cls: cls || el.tagName, ...rect(el) });
     }
   });
   return out;
