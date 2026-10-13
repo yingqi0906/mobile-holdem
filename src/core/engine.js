@@ -43,7 +43,7 @@ const STREET_AFTER = {
   [PHASES.TURN]: PHASES.RIVER,
 };
 
-const DEFAULT_NAMES = ['你', 'Iris', 'Kaito', 'Nadia', 'Omar', 'Vera'];
+const DEFAULT_NAMES = ['你', '阿杰', '小雨', '老陈', '林姐', '阿豪'];
 
 function clone(state) {
   return structuredClone(state);

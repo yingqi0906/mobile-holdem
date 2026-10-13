@@ -227,13 +227,12 @@ export function kickersOf(score) {
   return out;
 }
 
-const RANK_SINGULAR = [
-  '', '', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A',
-];
-const RANK_PLURAL = [
-  '', '', 'Twos', 'Threes', 'Fours', 'Fives', 'Sixes', 'Sevens', 'Eights',
-  'Nines', 'Tens', 'Jacks', 'Queens', 'Kings', 'Aces',
-];
+/**
+ * 点数直接用 A/K/Q/J/10 这种牌面写法。
+ * 中文牌桌上就是这么叫的（"一对 A"、"K 高同花"），
+ * 写成 "Aces"、"Kings" 反而要多绕一道。
+ */
+const RANK_TEXT = ['', '', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
 
 /** 把 score 翻译成人话，给界面显示。 */
 export function describeScore(score) {
@@ -241,23 +240,23 @@ export function describeScore(score) {
   const [k1, k2] = kickersOf(score);
   switch (cat) {
     case CATEGORY.STRAIGHT_FLUSH:
-      return k1 === 14 ? '皇家同花顺' : `${RANK_SINGULAR[k1]} 高同花顺`;
+      return k1 === 14 ? '皇家同花顺' : `${RANK_TEXT[k1]} 高同花顺`;
     case CATEGORY.QUADS:
-      return `四条 ${RANK_PLURAL[k1]}`;
+      return `四条 ${RANK_TEXT[k1]}`;
     case CATEGORY.FULL_HOUSE:
-      return `葫芦，${RANK_PLURAL[k1]} 带 ${RANK_PLURAL[k2]}`;
+      return `葫芦：${RANK_TEXT[k1]} 带 ${RANK_TEXT[k2]}`;
     case CATEGORY.FLUSH:
-      return `同花，${RANK_SINGULAR[k1]} 高`;
+      return `${RANK_TEXT[k1]} 高同花`;
     case CATEGORY.STRAIGHT:
-      return `${RANK_SINGULAR[k1]} 高顺子`;
+      return `${RANK_TEXT[k1]} 高顺子`;
     case CATEGORY.TRIPS:
-      return `三条 ${RANK_PLURAL[k1]}`;
+      return `三条 ${RANK_TEXT[k1]}`;
     case CATEGORY.TWO_PAIR:
-      return `两对，${RANK_PLURAL[k1]} 和 ${RANK_PLURAL[k2]}`;
+      return `两对：${RANK_TEXT[k1]} 和 ${RANK_TEXT[k2]}`;
     case CATEGORY.PAIR:
-      return `一对 ${RANK_PLURAL[k1]}`;
+      return `一对 ${RANK_TEXT[k1]}`;
     default:
-      return `${RANK_SINGULAR[k1]} 高牌`;
+      return `${RANK_TEXT[k1]} 高牌`;
   }
 }
 

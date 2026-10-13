@@ -21,7 +21,7 @@ import { bestFive } from '../core/evaluator.js';
 import { createCryptoRng } from '../core/rng.js';
 
 /** 每次发布时改一下这个号，界面上能看到，方便确认自己加载的是哪一版。 */
-const BUILD = 'v0.5';
+const BUILD = 'v0.6';
 
 const CONFIG = {
   smallBlind: 10,
@@ -98,12 +98,13 @@ const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const round5 = (v) => Math.round(v / 5) * 5;
 const isHandOver = () => state.phase === PHASES.HAND_OVER || state.phase === PHASES.IDLE;
 
-/** 头像里的缩写：中文名取第一个字，英文名取前两个字母。 */
+/** 头像里的缩写：中文名取前两个字，英文名取前两个字母。 */
 function initials(name) {
   const trimmed = String(name ?? '').trim();
   if (!trimmed) return '?';
-  if (/^[\x20-\x7f]+$/.test(trimmed)) return trimmed.slice(0, 2).toUpperCase();
-  return trimmed.slice(0, 1);
+  return /^[\x20-\x7f]+$/.test(trimmed)
+    ? trimmed.slice(0, 2).toUpperCase()
+    : trimmed.slice(0, 2);
 }
 
 function cardEl(card, { faceDown = false, board = false } = {}) {
@@ -243,14 +244,18 @@ function renderSeats() {
     // 状态徽标
     let badgeText = '';
     let badgeFold = false;
+    // 摊牌时每个亮牌的人都显示自己的牌型，不只是赢家
+    const showdownInfo = isHandOver()
+      ? state.result?.shown?.find((s) => s.seat === seat.index)
+      : null;
     const winInfo = isHandOver()
       ? state.result?.winners?.find((w) => w.seat === seat.index)
       : null;
 
-    if (winInfo) {
-      // 赢家的徽标直接显示牌型，跟 GGPoker 一样
-      badgeText =
-        state.result.shown?.find((s) => s.seat === seat.index)?.description ?? '赢得底池';
+    if (showdownInfo) {
+      badgeText = showdownInfo.description;
+    } else if (winInfo) {
+      badgeText = '赢得底池';
     } else if (seat.inHand && seat.folded) {
       badgeText = '弃牌';
       badgeFold = true;
@@ -563,48 +568,77 @@ function showResult() {
     'div',
     `result-sheet ${delta > 0 ? 'win' : delta < 0 ? 'loss' : 'tie'}`
   );
+  // 内容放 body 里滚动，"下一手"按钮固定在底部，永远看得见
+  const body = el('div', 'result-body');
 
   // 自上而下：结果 → 盈亏 → 说明 → 赢家的牌 → 派彩 → 下一手
-  sheet.appendChild(
+  body.appendChild(
     el('div', 'result-title', delta > 0 ? '你赢了' : delta < 0 ? '你输了' : '平手')
   );
   const amount = el('div', `result-amount ${delta > 0 ? 'up' : delta < 0 ? 'down' : ''}`);
   amount.append(el('span', 'chip-icon'), el('span', '', `${delta > 0 ? '+' : ''}${delta}`));
-  sheet.appendChild(amount);
-  sheet.appendChild(
-    el('div', 'result-sub', result.type === 'fold' ? '其他人都弃牌' : '摊牌比大小')
+  body.appendChild(amount);
+  body.appendChild(
+    el('div', 'result-sub', result.type === 'fold' ? '其他人都弃牌' : '按牌型大小分配彩池')
   );
 
-  // 亮出赢家的最佳五张 —— 摊牌时最想看的就是这个
-  const winnerWithCards = result.winners.find((w) => shownOf(w.seat));
-  if (winnerWithCards) {
-    const info = shownOf(winnerWithCards.seat);
-    const block = el('div', 'result-hand');
-    block.appendChild(el('div', 'result-hand-name', info.description));
-    const cards = el('div', 'result-cards');
-    const seat = state.seats[winnerWithCards.seat];
-    for (const card of bestFive([...seat.hole, ...state.board])) {
-      cards.appendChild(cardEl(card));
-    }
-    block.appendChild(cards);
-    sheet.appendChild(block);
-  }
+  if (result.shown?.length) {
+    // 摊牌：把每个亮牌玩家的底牌和牌型都列出来，按牌力从强到弱排。
+    // 只显示赢家不够 —— 你更想知道自己和对手差在哪。
+    const list = el('ul', 'showdown-list');
+    const ranked = [...result.shown].sort((a, b) => b.score - a.score);
+    for (const info of ranked) {
+      const seat = state.seats[info.seat];
+      const isWinner = result.winners.some((w) => w.seat === info.seat);
+      const net = seat.stack - seat.startStack;
 
-  // 谁赢了、赢了多少
-  const payouts = el('ul', 'result-payouts');
-  for (const w of result.winners) {
-    const li = el('li', w.seat === hero.index ? 'me' : '');
-    li.appendChild(el('span', 'who', w.seat === hero.index ? '你' : state.seats[w.seat].name));
-    li.appendChild(el('span', 'hand', shownOf(w.seat)?.description ?? '不战而胜'));
-    li.appendChild(el('span', 'amt', `+${w.amount}`));
-    payouts.appendChild(li);
+      const li = el('li', `${info.seat === hero.index ? 'me ' : ''}${isWinner ? 'winner' : ''}`);
+      const cards = el('div', 'sd-cards');
+      for (const card of info.cards) cards.appendChild(cardEl(card));
+      const mid = el('div', 'sd-mid');
+      mid.appendChild(el('div', 'sd-name', info.seat === hero.index ? '你' : seat.name));
+      mid.appendChild(el('div', 'sd-hand', info.description));
+      li.append(cards, mid, el('span', 'sd-amt', `${net > 0 ? '+' : ''}${net}`));
+      list.appendChild(li);
+    }
+    body.appendChild(list);
+
+    // 赢家的牌到底是哪五张凑出来的，单独再亮一次
+    const champ = result.winners.find((w) => shownOf(w.seat));
+    if (champ) {
+      const block = el('div', 'result-hand');
+      block.appendChild(
+        el(
+          'div',
+          'result-hand-name',
+          `${champ.seat === hero.index ? '你' : state.seats[champ.seat].name}的最佳五张`
+        )
+      );
+      const cards = el('div', 'result-cards');
+      const seat = state.seats[champ.seat];
+      for (const card of bestFive([...seat.hole, ...state.board])) {
+        cards.appendChild(cardEl(card));
+      }
+      block.appendChild(cards);
+      body.appendChild(block);
+    }
+  } else {
+    // 弃牌结束：没人亮牌，只需要说清谁拿走了底池
+    const payouts = el('ul', 'result-payouts');
+    for (const w of result.winners) {
+      const li = el('li', w.seat === hero.index ? 'me' : '');
+      li.appendChild(el('span', 'who', w.seat === hero.index ? '你' : state.seats[w.seat].name));
+      li.appendChild(el('span', 'hand', '其他人弃牌'));
+      li.appendChild(el('span', 'amt', `+${w.amount}`));
+      payouts.appendChild(li);
+    }
+    body.appendChild(payouts);
   }
-  sheet.appendChild(payouts);
 
   const next = el('button', 'btn primary result-next', '下一手');
   next.type = 'button';
   next.addEventListener('click', newHand);
-  sheet.appendChild(next);
+  sheet.append(body, next);
 
   els.overlay.innerHTML = '';
   els.overlay.appendChild(sheet);

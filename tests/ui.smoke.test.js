@@ -327,6 +327,20 @@ test('结算面板会亮出赢家的最佳五张牌', () => {
   const next = sheet.findButtons().find((b) => b.textContent.includes('下一手'));
   assert.ok(next, '应该有下一手按钮');
 
+  // 摊牌列表里应该有所有亮牌玩家的底牌和牌型，不只是赢家
+  const list = findFirst(sheet, (n) => n.classList.contains('showdown-list'));
+  assert.ok(list, '应该有摊牌列表');
+  assert.equal(
+    list.children.length,
+    debug.getState().result.shown.length,
+    '每个亮牌玩家都要有一行'
+  );
+  const rows = list.children.map((li) => li.textContent);
+  assert.ok(rows.length >= 2, `摊牌至少两行，实际 ${rows.length}`);
+  for (const row of rows) {
+    assert.ok(!/[A-Za-z]{2,}/.test(row), `摊牌行里出现了英文：${row}`);
+  }
+
   debug.stop();
   debug.newHand();
   debug.stop();

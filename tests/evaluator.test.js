@@ -70,7 +70,26 @@ test('7 选 5 会挑出最强的组合', () => {
   // 三张 K + 两张 A 时，应该识别为葫芦 K 带 A，而不是两对
   const boat = score('Kh Kd Kc Ah Ad 2s 3s');
   assert.equal(categoryOf(boat), CATEGORY.FULL_HOUSE);
-  assert.equal(describeScore(boat), '葫芦，Kings 带 Aces');
+  assert.equal(describeScore(boat), '葫芦：K 带 A');
+});
+
+test('牌型描述必须是中文，不能出现英文单词', () => {
+  const samples = [
+    'As Ks Qs Js Ts 2c 3d', // 皇家同花顺
+    'Ah Ad Ac As 2c 3d 4h', // 四条
+    'Kh Kd Kc Ah Ad 2s 3s', // 葫芦
+    'Ah 2h 5h 9h Kh 2c 3d', // 同花
+    '9h 8d 7c 6s 5h 2c 3d', // 顺子
+    'Ah Ad Ac Ks Qd 2c 3d', // 三条
+    'Ah Ad Kc Ks Qd 2c 3d', // 两对
+    'Ah Ad Kc Qs Jd 2c 3d', // 一对
+    'Ah Kd Qc Js 9d 2c 3d', // 高牌
+  ];
+  for (const sample of samples) {
+    const text = describeScore(score(sample));
+    assert.ok(!/[A-Za-z]{2,}/.test(text), `描述里出现了英文：${text}`);
+    assert.ok(text.length > 0);
+  }
 });
 
 test('踢脚器决定同牌型胜负', () => {
