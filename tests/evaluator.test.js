@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { parseCards } from '../src/core/cards.js';
 import {
   CATEGORY,
+  bestFive,
   categoryOf,
   describeScore,
   evaluateBest,
@@ -84,4 +85,24 @@ test('踢脚器决定同牌型胜负', () => {
 test('evaluate5 与 evaluateBest 在 5 张时结果一致', () => {
   const cards = parseCards('Ah Kd Qc Js 9d');
   assert.equal(evaluate5(cards), evaluateBest(cards));
+});
+
+test('bestFive 挑出的确实是构成最强牌型的那 5 张', () => {
+  // 三张 K + 两张 A：最强是葫芦 K 带 A，不能把 A 之外的杂牌算进去
+  const boat = parseCards('Kh Kd Kc Ah Ad 2s 3s');
+  const five = bestFive(boat);
+  assert.equal(five.length, 5);
+  assert.equal(evaluate5(five), evaluateBest(boat));
+  assert.deepEqual(
+    five.map((c) => c).sort((a, b) => a - b),
+    parseCards('Kh Kd Kc Ah Ad').sort((a, b) => a - b)
+  );
+
+  // 顺子：A 只作为最高张，不该被选进轮子顺
+  const wheel = parseCards('Ah 2d 3c 4s 5h 9c Kd');
+  assert.equal(evaluate5(bestFive(wheel)), evaluateBest(wheel));
+
+  // 5 张时原样返回
+  const exact = parseCards('Ah Kd Qc Js 9d');
+  assert.equal(bestFive(exact).length, 5);
 });

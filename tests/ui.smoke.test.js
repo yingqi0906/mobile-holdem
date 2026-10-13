@@ -87,6 +87,15 @@ class El {
   append(...nodes) {
     for (const node of nodes) this.appendChild(node);
   }
+  removeChild(child) {
+    const i = this.children.indexOf(child);
+    if (i >= 0) this.children.splice(i, 1);
+    child.parentNode = null;
+    return child;
+  }
+  remove() {
+    if (this.parentNode) this.parentNode.removeChild(this);
+  }
 
   get childElementCount() {
     return this.children.length;
@@ -196,10 +205,19 @@ test('连续打完多手牌不会崩，且筹码守恒', () => {
     const state = debug.getState();
     assert.equal(state.phase, 'handOver');
     assert.ok(state.result, '结束后必须有结算结果');
+
+    // 这个单机版开了「破产自动补码」，所以筹码总量只可能因为补码而增加，
+    // 而且每次补码正好是一个买入量。反过来，筹码凭空消失就是真 bug。
+    const total = state.seats.reduce((sum, s) => sum + s.stack, 0);
+    assert.ok(total >= initialTotal, `第 ${hand + 1} 手之后筹码不该减少`);
     assert.equal(
-      state.seats.reduce((sum, s) => sum + s.stack, 0),
-      initialTotal,
-      `第 ${hand + 1} 手之后筹码不守恒`
+      (total - initialTotal) % 2000,
+      0,
+      `第 ${hand + 1} 手之后多出来的筹码应该正好是补码`
+    );
+    assert.ok(
+      state.seats.every((s) => Number.isInteger(s.stack) && s.stack >= 0),
+      '筹码必须是非负整数'
     );
   }
 
@@ -271,3 +289,55 @@ test('重绘不会重建已有的公共牌', () => {
   debug.newHand();
   debug.stop();
 });
+
+test('结算面板会亮出赢家的最佳五张牌', () => {
+  debug.stop();
+
+  // 打到出现摊牌为止（一路跟注，尽量让牌局走到河牌）
+  let showdownReached = false;
+  for (let attempt = 0; attempt < 20 && !showdownReached; attempt++) {
+    debug.newHand();
+    let guard = 0;
+    while (!debug.isHandOver() && guard++ < 400) {
+      const state = debug.getState();
+      const actor = state.seats[state.toAct];
+      if (actor.isHuman) {
+        const legal = debug.legal();
+        debug.humanAct(legal.canCheck ? 'check' : 'call');
+      } else if (!debug.botAct()) {
+        break;
+      }
+    }
+    if (debug.getState().result?.type === 'showdown') showdownReached = true;
+  }
+  assert.ok(showdownReached, '这么多手牌里应该至少摊牌一次');
+
+  debug.showResult();
+  const overlay = byId.get('overlay');
+  assert.equal(overlay.children.length, 1, '结算面板应该被挂上去');
+
+  const sheet = overlay.children[0];
+  assert.ok(sheet.classList.contains('result-sheet'), '应该是底部升起的结算面板');
+
+  // 面板里应该有一组 5 张牌的展示区
+  const cardsRow = findFirst(sheet, (n) => n.classList.contains('result-cards'));
+  assert.ok(cardsRow, '应该有亮牌区域');
+  assert.equal(cardsRow.children.length, 5, '应该亮出最佳五张');
+
+  const next = sheet.findButtons().find((b) => b.textContent.includes('下一手'));
+  assert.ok(next, '应该有下一手按钮');
+
+  debug.stop();
+  debug.newHand();
+  debug.stop();
+});
+
+/** 在 DOM 桩里按条件找第一个元素。 */
+function findFirst(node, predicate) {
+  if (predicate(node)) return node;
+  for (const child of node.children) {
+    const hit = findFirst(child, predicate);
+    if (hit) return hit;
+  }
+  return null;
+}

@@ -705,10 +705,11 @@ body {
   position: fixed;
   inset: 0;
   display: grid;
-  place-items: center;
-  padding: 22px;
-  background: rgba(2, 7, 5, 0.76);
-  backdrop-filter: blur(3px);
+  align-items: flex-end;
+  justify-items: center;
+  padding: 0;
+  background: rgba(2, 7, 5, 0.68);
+  backdrop-filter: blur(2px);
   z-index: 30;
 }
 
@@ -717,60 +718,177 @@ body {
   display: none;
 }
 
-.result-card {
-  width: min(336px, 100%);
-  padding: 20px 18px 16px;
-  border-radius: 18px;
-  text-align: center;
-  background: linear-gradient(#10281c, #061510);
-  border: 1px solid rgba(242, 197, 61, 0.3);
-  box-shadow: 0 22px 54px rgba(0, 0, 0, 0.65);
-  animation: pop 0.22s ease;
+/* --- 结算面板：从底部升起的卡片（GGPoker 风格）--- */
+
+.result-sheet {
+  width: 100%;
+  max-width: 620px;
+  padding: 16px 16px calc(14px + var(--safe-b));
+  border-radius: 20px 20px 0 0;
+  background: linear-gradient(#0f2418, #06120d);
+  border-top: 1px solid rgba(242, 197, 61, 0.32);
+  box-shadow: 0 -20px 54px rgba(0, 0, 0, 0.68);
+  animation: sheet-up 0.26s cubic-bezier(0.2, 0.9, 0.3, 1);
 }
 
-@keyframes pop {
-  from {
-    opacity: 0;
-    transform: scale(0.93) translateY(8px);
-  }
+.result-sheet.win {
+  border-top-color: rgba(88, 226, 148, 0.6);
 }
 
-.result-card h2 {
-  margin: 0 0 4px;
+.result-sheet.loss {
+  border-top-color: rgba(220, 90, 78, 0.55);
+}
+
+.result-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.result-title {
   font-size: 19px;
+  font-weight: 800;
 }
 
-.result-card .delta {
-  font-size: 31px;
-  font-weight: 900;
-  font-variant-numeric: tabular-nums;
-  margin: 4px 0 10px;
-}
-
-.result-card .delta.up {
+.result-sheet.win .result-title {
   color: #7ce0a7;
 }
 
-.result-card .delta.down {
+.result-sheet.loss .result-title {
   color: #f19a92;
 }
 
-.result-card .detail {
-  font-size: 13px;
+.result-sub {
+  margin-top: 2px;
+  font-size: 12px;
   color: var(--muted);
-  line-height: 1.7;
-  margin-bottom: 16px;
 }
 
-.result-card .detail b {
+.result-amount {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 29px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.result-amount.up {
+  color: #7ce0a7;
+}
+
+.result-amount.down {
+  color: #f19a92;
+}
+
+.result-amount .chip-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.result-hand {
+  margin-top: 13px;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--line);
+}
+
+.result-hand-name {
+  margin-bottom: 9px;
+  font-size: 13px;
+  font-weight: 700;
   color: var(--gold);
 }
 
-.result-card .shown {
+.result-cards {
   display: flex;
   justify-content: center;
   gap: 5px;
-  margin-bottom: 14px;
+  --card-w: clamp(30px, 8.6vw, 42px);
+}
+
+.result-payouts {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+
+.result-payouts li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  color: var(--muted);
+}
+
+.result-payouts .who {
+  min-width: 52px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.result-payouts li.me .who {
+  color: var(--gold);
+}
+
+.result-payouts .hand {
+  flex: 1;
+  font-size: 12px;
+}
+
+.result-payouts .amt {
+  font-weight: 800;
+  color: #7ce0a7;
+  font-variant-numeric: tabular-nums;
+}
+
+.result-next {
+  margin-top: 14px;
+}
+
+/* 赢家座位上飘出的筹码数字 */
+.win-delta {
+  position: absolute;
+  left: var(--x);
+  top: var(--y);
+  transform: translate(-50%, -50%);
+  font-size: 16px;
+  font-weight: 900;
+  color: #7ce0a7;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.85);
+  pointer-events: none;
+  animation: float-up 1.8s ease-out forwards;
+}
+
+@keyframes float-up {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.7);
+  }
+  18% {
+    opacity: 1;
+    transform: translate(-50%, -110%) scale(1.12);
+  }
+  38% {
+    transform: translate(-50%, -125%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -230%) scale(1);
+  }
+}
+
+/* HUD 上的版本号，用来确认自己加载的是哪一版 */
+.build {
+  align-self: center;
+  margin-right: 2px;
+  font-size: 11px;
+  color: rgba(238, 244, 240, 0.32);
+  font-variant-numeric: tabular-nums;
 }
 
 /* --------------------------------------------------------------- 日志 */

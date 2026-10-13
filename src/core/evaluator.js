@@ -193,6 +193,28 @@ export function categoryOf(score) {
   return Math.floor(score / CATEGORY_SCALE);
 }
 
+/**
+ * 找出这手牌里最强的 5 张（而不是只返回一个分数）。
+ * 结算界面要像 GGPoker 那样把赢家的最佳五张亮出来，所以需要具体的牌。
+ */
+export function bestFive(cards) {
+  const n = cards.length;
+  if (n === 5) return cards.slice();
+  if (n < 5 || n > 7) throw new Error(`无法评估 ${n} 张牌`);
+  const combos = combosOf(n);
+  let best = -1;
+  let bestCombo = null;
+  for (let i = 0; i < combos.length; i++) {
+    const c = combos[i];
+    const s = score5(cards, c[0], c[1], c[2], c[3], c[4]);
+    if (s > best) {
+      best = s;
+      bestCombo = c;
+    }
+  }
+  return bestCombo.map((i) => cards[i]);
+}
+
 /** 解出 score 里的 5 个关键点数（降序，不用的补 0）。 */
 export function kickersOf(score) {
   let rem = score % CATEGORY_SCALE;

@@ -17,7 +17,11 @@ import {
 } from '../core/engine.js';
 import { attachBots, decideBotAction } from '../core/ai.js';
 import { cardToLabel, isRed } from '../core/cards.js';
+import { bestFive } from '../core/evaluator.js';
 import { createCryptoRng } from '../core/rng.js';
+
+/** 每次发布时改一下这个号，界面上能看到，方便确认自己加载的是哪一版。 */
+const BUILD = 'v0.4';
 
 const CONFIG = {
   smallBlind: 10,
@@ -55,6 +59,7 @@ const els = {
   hand: document.getElementById('hud-hand'),
   btnLog: document.getElementById('btn-log'),
   btnNew: document.getElementById('btn-new'),
+  build: document.getElementById('hud-build'),
   pot: document.getElementById('pot-amount'),
   community: document.getElementById('community'),
   street: document.getElementById('street-label'),
@@ -237,7 +242,15 @@ function renderSeats() {
     // 状态徽标
     let badgeText = '';
     let badgeFold = false;
-    if (seat.inHand && seat.folded) {
+    const winInfo = isHandOver()
+      ? state.result?.winners?.find((w) => w.seat === seat.index)
+      : null;
+
+    if (winInfo) {
+      // 赢家的徽标直接显示牌型，跟 GGPoker 一样
+      badgeText =
+        state.result.shown?.find((s) => s.seat === seat.index)?.description ?? '赢得底池';
+    } else if (seat.inHand && seat.folded) {
       badgeText = '弃牌';
       badgeFold = true;
     } else if (seat.inHand && seat.allIn) {
@@ -316,6 +329,7 @@ function renderHud() {
   const { smallBlind, bigBlind } = state.config;
   els.blinds.textContent = `盲注 ${smallBlind} / ${bigBlind}`;
   els.hand.textContent = `第 ${Math.max(state.handNumber, 1)} 手`;
+  els.build.textContent = BUILD;
 }
 
 // ---------------------------------------------------------------------------
@@ -509,47 +523,76 @@ function showResult() {
 
   const hero = humanSeat(state);
   const delta = hero.stack - hero.startStack;
-  const won = delta > 0;
+  const shownOf = (seatIdx) => result.shown?.find((s) => s.seat === seatIdx) ?? null;
 
-  const card = el('div', 'result-card');
-  card.appendChild(
-    el('h2', '', delta > 0 ? '这一手赢了' : delta < 0 ? '这一手输了' : '平手')
+  const sheet = el(
+    'div',
+    `result-sheet ${delta > 0 ? 'win' : delta < 0 ? 'loss' : 'tie'}`
   );
-  card.appendChild(el('div', `delta ${won ? 'up' : 'down'}`, `${delta > 0 ? '+' : ''}${delta}`));
 
-  const detail = el('div', 'detail');
-  if (result.type === 'fold') {
-    const w = result.winners[0];
-    detail.innerHTML =
-      w.seat === hero.index
-        ? `其他人都弃牌，你直接拿下 <b>${w.amount}</b>`
-        : `其他人都弃牌，<b>${state.seats[w.seat].name}</b> 拿下 ${w.amount}`;
-  } else {
-    const lines = result.winners.map(
-      (w) =>
-        `<b>${state.seats[w.seat].name}</b> 用 ${
-          result.shown.find((s) => s.seat === w.seat)?.description ?? ''
-        } 赢得 ${w.amount}`
-    );
-    detail.innerHTML = lines.join('<br>');
+  // 顶部：结果 + 这一手的盈亏
+  const top = el('div', 'result-top');
+  const heading = el('div', 'result-heading');
+  heading.appendChild(
+    el('div', 'result-title', delta > 0 ? '你赢了' : delta < 0 ? '你输了' : '平手')
+  );
+  heading.appendChild(
+    el('div', 'result-sub', result.type === 'fold' ? '其他人都弃牌' : '摊牌比大小')
+  );
+  top.appendChild(heading);
+
+  const amount = el('div', `result-amount ${delta > 0 ? 'up' : delta < 0 ? 'down' : ''}`);
+  amount.append(el('span', 'chip-icon'), el('span', '', `${delta > 0 ? '+' : ''}${delta}`));
+  top.appendChild(amount);
+  sheet.appendChild(top);
+
+  // 亮出赢家的最佳五张 —— 摊牌时最想看的就是这个
+  const winnerWithCards = result.winners.find((w) => shownOf(w.seat));
+  if (winnerWithCards) {
+    const info = shownOf(winnerWithCards.seat);
+    const block = el('div', 'result-hand');
+    block.appendChild(el('div', 'result-hand-name', info.description));
+    const cards = el('div', 'result-cards');
+    const seat = state.seats[winnerWithCards.seat];
+    for (const card of bestFive([...seat.hole, ...state.board])) {
+      cards.appendChild(cardEl(card));
+    }
+    block.appendChild(cards);
+    sheet.appendChild(block);
   }
-  card.appendChild(detail);
 
-  const shown = result.shown?.find((s) => s.seat === hero.index);
-  if (shown) {
-    const row = el('div', 'shown');
-    for (const c of shown.cards) row.appendChild(cardEl(c));
-    card.appendChild(row);
+  // 谁赢了、赢了多少
+  const payouts = el('ul', 'result-payouts');
+  for (const w of result.winners) {
+    const li = el('li', w.seat === hero.index ? 'me' : '');
+    li.appendChild(el('span', 'who', w.seat === hero.index ? '你' : state.seats[w.seat].name));
+    li.appendChild(el('span', 'hand', shownOf(w.seat)?.description ?? '不战而胜'));
+    li.appendChild(el('span', 'amt', `+${w.amount}`));
+    payouts.appendChild(li);
   }
+  sheet.appendChild(payouts);
 
-  const next = el('button', 'btn primary', '下一手');
+  const next = el('button', 'btn primary result-next', '下一手');
   next.type = 'button';
   next.addEventListener('click', newHand);
-  card.appendChild(next);
+  sheet.appendChild(next);
 
   els.overlay.innerHTML = '';
-  els.overlay.appendChild(card);
+  els.overlay.appendChild(sheet);
   els.overlay.classList.remove('hidden');
+
+  // 筹码飞向赢家的那个数字
+  for (const w of result.winners) showWinDelta(w.seat, w.amount);
+}
+
+/** 赢家座位上飘一个 "+340" 的数字，给结算加点即时反馈。 */
+function showWinDelta(seatIdx, amount) {
+  const pos = POSITIONS[seatIdx] ?? POSITIONS[0];
+  const node = el('div', 'win-delta', `+${amount}`);
+  node.style.setProperty('--x', `${pos.x}%`);
+  node.style.setProperty('--y', `${pos.y}%`);
+  els.chipLayer.appendChild(node);
+  setTimeout(() => node.remove(), 1800);
 }
 
 function hideOverlay() {
@@ -686,11 +729,35 @@ function boot() {
   bind();
   newHand();
 
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('sw.js').catch(() => {});
-    });
-  }
+  setupServiceWorker();
+}
+
+/**
+ * 注册 Service Worker，并且在新版本接管后自动刷新一次。
+ *
+ * 这一步是为了解决"改了代码但用户一直看到旧版"的问题：旧的 SW 一旦
+ * 还在控制页面，它就会继续把缓存的旧文件喂给你。这里主动触发更新检查，
+ * 等新 SW 拿到控制权后自动 reload。
+ *
+ * 注意 hadController：首次安装时 controller 是空的，此时不能刷新，
+ * 否则会陷入无限刷新。
+ */
+function setupServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+
+  const hadController = Boolean(navigator.serviceWorker.controller);
+  let reloaded = false;
+
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloaded) return;
+    reloaded = true;
+    location.reload();
+  });
+
+  navigator.serviceWorker
+    .register('sw.js')
+    .then((registration) => registration.update())
+    .catch(() => {});
 }
 
 if (typeof document !== 'undefined') boot();
@@ -706,6 +773,7 @@ export const debug = {
   humanAct: (type, amount) => humanAct(type, amount),
   botAct: () => performBotAction(),
   render,
+  showResult,
   stop: () => {
     clearTimeout(botTimer);
     clearTimeout(resultTimer);
