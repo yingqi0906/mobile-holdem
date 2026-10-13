@@ -132,6 +132,8 @@ const MEASURE = `(() => {
     ['community', '.community'], ['actionbar', '.actionbar'],
     ['betPanel', '.bet-panel'], ['resultSheet', '.result-sheet'],
     ['resultNext', '.result-next'], ['overlay', '.overlay'],
+    ['hudNet', '#btn-chips'], ['chipPanel', '#chippanel'],
+    ['chipStats', '.chip-stats'], ['chipChart', '.chip-chart'],
   ]) {
     const el = document.querySelector(sel);
     if (el) out.nodes[name] = rect(el);
@@ -152,6 +154,10 @@ const MEASURE = `(() => {
   if (betValue) out.betValue = betValue.textContent;
   const sheetEl = document.querySelector('.result-sheet');
   if (sheetEl) out.resultText = sheetEl.innerText;
+  const chipPanelEl = document.querySelector('#chippanel');
+  if (chipPanelEl) out.chipText = chipPanelEl.innerText.replace(/\\n+/g, ' | ');
+  const hudEl = document.querySelector('.hud');
+  if (hudEl) out.hudText = hudEl.innerText.replace(/\\n+/g, ' ');
   const listEl = document.querySelector('.showdown-list');
   if (listEl) out.showdownRows = [...listEl.children].map((li) => li.innerText.replace(/\\n/g, ' | '));
   document.querySelectorAll('.seat').forEach((el, i) => {
@@ -229,6 +235,27 @@ const SCRIPT_OPEN_RAISE = `(() => {
   return raise ? 'opened' : 'no-raise-button';
 })()`;
 
+const SCRIPT_OPEN_CHIPS = `(() => {
+  const d = window.__holdem;
+  if (!d) return 'no-debug-hook';
+  d.stop();
+  // 先打几手，让走势图有数据
+  for (let h = 0; h < 6; h++) {
+    d.newHand();
+    let n = 0;
+    while (!d.isHandOver() && n++ < 400) {
+      const s = d.getState();
+      if (s.seats[s.toAct].isHuman) {
+        const l = d.legal();
+        d.humanAct(l.canCheck ? 'check' : 'call');
+      } else if (!d.botAct()) break;
+    }
+  }
+  const btn = document.getElementById('btn-chips');
+  if (btn) btn.click();
+  return btn ? 'opened' : 'no-button';
+})()`;
+
 async function main() {
   await waitForDevtools();
   const target = await newTarget('about:blank');
@@ -250,6 +277,10 @@ async function main() {
     await sleep(500);
   } else if (scenario === 'raise') {
     const note = await cdp.eval(SCRIPT_OPEN_RAISE);
+    if (note !== 'opened') console.error('提示：', note);
+    await sleep(400);
+  } else if (scenario === 'chips') {
+    const note = await cdp.eval(SCRIPT_OPEN_CHIPS);
     if (note !== 'opened') console.error('提示：', note);
     await sleep(400);
   }

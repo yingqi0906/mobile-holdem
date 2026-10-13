@@ -22,12 +22,16 @@
     <div id="app">
       <header class="hud">
         <div class="hud-info">
-          <span id="hud-blinds">盲注 10 / 20</span>
+          <span id="hud-blinds">盲注 1 / 2</span>
           <span class="dot">·</span>
           <span id="hud-hand">第 1 手</span>
+          <span class="dot">·</span>
+          <span id="hud-build" class="build"></span>
         </div>
         <div class="hud-actions">
-          <span id="hud-build" class="build"></span>
+          <button id="btn-chips" class="chip-badge" type="button" aria-label="筹码变化">
+            <span class="chip-icon"></span><span id="hud-net">0</span>
+          </button>
           <button id="btn-log" class="icon-btn" type="button">记录</button>
           <button id="btn-new" class="icon-btn" type="button">重开</button>
         </div>
@@ -57,6 +61,16 @@
         </header>
         <ol id="log-list"></ol>
       </aside>
+
+      <aside class="logpanel hidden" id="chippanel">
+        <header class="log-head">
+          <h2>筹码变化</h2>
+          <button id="chip-close" class="icon-btn" type="button">关闭</button>
+        </header>
+        <div id="chip-body"></div>
+      </aside>
+
+      <div class="toast" id="toast"></div>
 
       <div class="overlay hidden" id="overlay"></div>
     </div>

@@ -21,12 +21,12 @@ import { bestFive } from '../core/evaluator.js';
 import { createCryptoRng } from '../core/rng.js';
 
 /** 每次发布时改一下这个号，界面上能看到，方便确认自己加载的是哪一版。 */
-const BUILD = 'v0.7';
+const BUILD = 'v0.8';
 
 const CONFIG = {
-  smallBlind: 10,
-  bigBlind: 20,
-  startingStack: 2000,
+  smallBlind: 1,
+  bigBlind: 2,
+  startingStack: 200,
   seatCount: 6,
   autoRebuy: true,
 };
@@ -59,6 +59,8 @@ const els = {
   hand: document.getElementById('hud-hand'),
   btnLog: document.getElementById('btn-log'),
   btnNew: document.getElementById('btn-new'),
+  btnChips: document.getElementById('btn-chips'),
+  net: document.getElementById('hud-net'),
   build: document.getElementById('hud-build'),
   tableArea: document.getElementById('table-area'),
   pot: document.getElementById('pot-amount'),
@@ -71,6 +73,10 @@ const els = {
   logpanel: document.getElementById('logpanel'),
   logList: document.getElementById('log-list'),
   logClose: document.getElementById('log-close'),
+  chippanel: document.getElementById('chippanel'),
+  chipBody: document.getElementById('chip-body'),
+  chipClose: document.getElementById('chip-close'),
+  toast: document.getElementById('toast'),
 };
 
 const rng = createCryptoRng();
@@ -81,7 +87,57 @@ let resultTimer = null;
 let resultShownFor = -1;
 let renderedPhase = null;
 let betPanel = { open: false, value: 0 };
+/** 自己的筹码走势：每手结束后记一次，用来画曲线。 */
+let chipHistory = [CONFIG.startingStack];
+let chipHistoryHand = 0;
+/** 累计投入（初次买入 + 每次自动补码），净盈亏就是拿它算的。 */
+let totalInvested = CONFIG.startingStack;
+let toastTimer = null;
 const seatEls = [];
+
+/** 每手结束后记一次自己的筹码，供走势图使用。 */
+function recordChipHistory() {
+  if (!isHandOver() || chipHistoryHand === state.handNumber) return;
+  chipHistoryHand = state.handNumber;
+  chipHistory.push(humanSeat(state).stack);
+  if (chipHistory.length > 300) chipHistory.shift();
+}
+
+/** 从顶部飘一条提示，比如破产补码。 */
+function showToast(text) {
+  clearTimeout(toastTimer);
+  els.toast.textContent = text;
+  els.toast.classList.add('show');
+  toastTimer = setTimeout(() => els.toast.classList.remove('show'), 2800);
+}
+
+/**
+ * 把一串数值画成折线面积图。
+ *
+ * 用 innerHTML 拼 SVG 字符串而不是 createElementNS —— 这样连测试用的
+ * DOM 桩也能跑通，不需要额外支持命名空间。
+ */
+function sparklineSvg(values) {
+  if (values.length < 2) return '';
+  const w = 300;
+  const h = 72;
+  const pad = 8;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = Math.max(1, max - min);
+  const x = (i) => pad + (i / (values.length - 1)) * (w - pad * 2);
+  const y = (v) => h - pad - ((v - min) / span) * (h - pad * 2);
+  const points = values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  const rising = values[values.length - 1] >= values[0];
+  const stroke = rising ? '#7ce0a7' : '#f19a92';
+  return (
+    `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" class="spark" aria-hidden="true">` +
+    `<polygon points="${pad},${h - pad} ${points} ${w - pad},${h - pad}" fill="${stroke}" opacity="0.15"/>` +
+    `<polyline points="${points}" fill="none" stroke="${stroke}" stroke-width="2" ` +
+    `stroke-linejoin="round" stroke-linecap="round"/>` +
+    `</svg>`
+  );
+}
 
 // ---------------------------------------------------------------------------
 // 小工具
@@ -95,7 +151,12 @@ function el(tag, className, text) {
 }
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-const round5 = (v) => Math.round(v / 5) * 5;
+/**
+ * 筹码取整的步长：四分之一个大盲，至少 1。
+ * 盲注 1/2 时步长就是 1 —— 以前写死 5 的话，最小加注 2 会被取整成 0，直接算错。
+ */
+const chipStep = () => Math.max(1, Math.round(state.config.bigBlind / 4));
+const roundChip = (v) => Math.round(v / chipStep()) * chipStep();
 const isHandOver = () => state.phase === PHASES.HAND_OVER || state.phase === PHASES.IDLE;
 
 /** 头像里的缩写：中文名取前两个字，英文名取前两个字母。 */
@@ -336,6 +397,12 @@ function renderHud() {
   els.blinds.textContent = `盲注 ${smallBlind} / ${bigBlind}`;
   els.hand.textContent = `第 ${Math.max(state.handNumber, 1)} 手`;
   els.build.textContent = BUILD;
+
+  // 常驻显示"本局净变化" —— 座位上那块筹码数字看不出这个
+  const net = humanSeat(state).stack - totalInvested;
+  els.net.textContent = `${net > 0 ? '+' : ''}${net}`;
+  els.btnChips.classList.toggle('up', net > 0);
+  els.btnChips.classList.toggle('down', net < 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -345,7 +412,7 @@ function renderHud() {
 function potSizedTarget(legal, fraction) {
   const potAfterCall = totalPot(state) + legal.toCall;
   return clamp(
-    round5(state.currentBet + potAfterCall * fraction),
+    roundChip(state.currentBet + potAfterCall * fraction),
     legal.minRaiseTo,
     legal.maxRaiseTo
   );
@@ -361,7 +428,7 @@ function potSizedTarget(legal, fraction) {
  */
 function betPresets(legal) {
   const bb = state.config.bigBlind;
-  const fit = (v) => clamp(round5(v), legal.minRaiseTo, legal.maxRaiseTo);
+  const fit = (v) => clamp(roundChip(v), legal.minRaiseTo, legal.maxRaiseTo);
 
   if (state.phase === PHASES.PREFLOP) {
     if (state.currentBet <= bb) {
@@ -404,7 +471,8 @@ function buildBetPanel(legal) {
   slider.className = 'bet-slider';
   slider.min = String(legal.minRaiseTo);
   slider.max = String(legal.maxRaiseTo);
-  slider.step = String(legal.maxRaiseTo - legal.minRaiseTo >= 150 ? 5 : 1);
+  // 筹码量级小的时候用 5 做步长太粗，滑一下就越过好几个大盲
+  slider.step = String(legal.maxRaiseTo - legal.minRaiseTo >= 500 ? 5 : 1);
   slider.value = String(betPanel.value);
 
   const presets = el('div', 'preset-row');
@@ -550,6 +618,39 @@ function renderLog() {
     els.logList.appendChild(el('li', '', entry.text));
   }
   els.logList.scrollTop = els.logList.scrollHeight;
+}
+
+/** 筹码面板：当前值、净变化、买卖次数，加上一条走势曲线。 */
+function renderChipPanel() {
+  if (els.chippanel.classList.contains('hidden')) return;
+
+  const hero = humanSeat(state);
+  const net = hero.stack - totalInvested;
+  const peak = Math.max(...chipHistory);
+  const low = Math.min(...chipHistory);
+
+  els.chipBody.innerHTML = '';
+
+  const stats = el('dl', 'chip-stats');
+  const addRow = (label, value, tone) => {
+    stats.appendChild(el('dt', '', label));
+    stats.appendChild(el('dd', tone ?? '', value));
+  };
+  addRow('当前筹码', String(hero.stack));
+  addRow('本局净变化', `${net > 0 ? '+' : ''}${net}`, net > 0 ? 'up' : net < 0 ? 'down' : '');
+  addRow('累计买入', String(totalInvested));
+  addRow('最高 / 最低', `${peak} / ${low}`);
+  addRow('已打手数', String(Math.max(0, chipHistory.length - 1)));
+  els.chipBody.appendChild(stats);
+
+  const chart = el('div', 'chip-chart');
+  chart.innerHTML = sparklineSvg(chipHistory);
+  els.chipBody.appendChild(chart);
+
+  const note =
+    `每个点是打完一手之后的筹码。起始买入 ${CONFIG.startingStack}，` +
+    '输光会在下一手自动补入同样的数额。';
+  els.chipBody.appendChild(el('p', 'chip-note', note));
 }
 
 // ---------------------------------------------------------------------------
@@ -701,11 +802,13 @@ function render() {
     }
   }
 
+  recordChipHistory();
   renderHud();
   renderBoard();
   renderSeats();
   renderActionBar();
   renderLog();
+  renderChipPanel();
   maybeShowResult();
 }
 
@@ -765,6 +868,15 @@ function newHand() {
   renderedPhase = null;
 
   state = startHand(state, rng);
+
+  // 破产补码必须让玩家看见，否则"我的筹码怎么突然变多了"没法解释
+  for (const event of state.events) {
+    if (event.type === 'rebuy' && state.seats[event.seat].isHuman) {
+      totalInvested += event.amount;
+      showToast(`筹码输光了，自动补入 ${event.amount}（累计买入 ${totalInvested}）`);
+    }
+  }
+
   render();
 
   if (isHandOver()) {
@@ -783,6 +895,9 @@ function hardReset() {
   betPanel.open = false;
   renderedPhase = null;
   resultShownFor = -1;
+  chipHistory = [CONFIG.startingStack];
+  chipHistoryHand = 0;
+  totalInvested = CONFIG.startingStack;
   state = attachBots(createTable(CONFIG), rng);
   buildSeats();
   render();
@@ -798,6 +913,11 @@ function bind() {
     renderLog();
   });
   els.logClose.addEventListener('click', () => els.logpanel.classList.add('hidden'));
+  els.btnChips.addEventListener('click', () => {
+    els.chippanel.classList.remove('hidden');
+    renderChipPanel();
+  });
+  els.chipClose.addEventListener('click', () => els.chippanel.classList.add('hidden'));
 }
 
 function boot() {

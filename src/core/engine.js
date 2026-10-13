@@ -206,6 +206,10 @@ export function startHand(prev, rng = defaultRng()) {
       if (seat.stack <= 0) {
         seat.stack = state.config.startingStack;
         state.events.push({ type: 'rebuy', seat: seat.index, amount: seat.stack });
+        state.log.push({
+          hand: state.handNumber + 1,
+          text: `${seat.name} 输光了，自动补入 ${seat.stack}`,
+        });
       }
     }
   }

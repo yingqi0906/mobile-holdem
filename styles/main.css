@@ -110,6 +110,53 @@ body {
   background: rgba(255, 255, 255, 0.14);
 }
 
+/* HUD 上常驻的"本局净变化"徽标，点开是完整筹码面板 */
+
+.chip-badge {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.chip-badge .chip-icon {
+  width: 11px;
+  height: 11px;
+}
+
+.chip-badge.up {
+  color: #7ce0a7;
+  border-color: rgba(124, 224, 167, 0.4);
+}
+
+.chip-badge.down {
+  color: #f19a92;
+  border-color: rgba(241, 154, 146, 0.4);
+}
+
+.chip-badge:active {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.hud-info {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.hud-actions {
+  flex: none;
+}
+
 /* ------------------------------------------------------------- 牌桌主体 */
 
 .table-area {
@@ -1066,4 +1113,84 @@ body {
   color: var(--gold);
   font-weight: 600;
   border-bottom-color: rgba(242, 197, 61, 0.2);
+}
+
+/* ------------------------------------------------------------ 筹码面板 */
+
+.chip-stats {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 7px 12px;
+  margin: 0;
+  padding: 4px 16px 0;
+  font-size: 13px;
+}
+
+.chip-stats dt {
+  color: var(--muted);
+}
+
+.chip-stats dd {
+  margin: 0;
+  text-align: right;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.chip-stats dd.up {
+  color: #7ce0a7;
+}
+
+.chip-stats dd.down {
+  color: #f19a92;
+}
+
+.chip-chart {
+  height: 72px;
+  margin: 14px 16px 0;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.32);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.chip-chart .spark {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.chip-note {
+  margin: 10px 16px 18px;
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+
+/* ---------------------------------------------------------------- 提示条 */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  top: calc(var(--safe-t) + 54px);
+  transform: translate(-50%, -8px);
+  max-width: calc(100% - 32px);
+  padding: 9px 16px;
+  border-radius: 999px;
+  background: rgba(8, 20, 15, 0.96);
+  border: 1px solid rgba(242, 197, 61, 0.42);
+  color: var(--gold);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.22s ease, transform 0.22s ease;
+  z-index: 50;
+}
+
+.toast.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
 }

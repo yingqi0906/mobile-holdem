@@ -141,13 +141,13 @@ test('初始渲染：6 个座位、HUD、底牌明暗都正确', () => {
 
   const seats = byId.get('seat-layer');
   assert.equal(seats.children.length, 6, '应该建出 6 个座位');
-  assert.match(byId.get('hud-blinds').textContent, /10 \/ 20/);
+  assert.match(byId.get('hud-blinds').textContent, /1 \/ 2/);
   assert.match(byId.get('hud-hand').textContent, /第 1 手/);
 
   const state = debug.getState();
   assert.equal(state.phase, 'preflop');
   assert.equal(state.seats[0].isHuman, true);
-  assert.equal(byId.get('pot-amount').textContent, '30', '盲注已经进池');
+  assert.equal(byId.get('pot-amount').textContent, '3', '盲注已经进池');
 
   // 座位骨架顺序是 hole → plate → dealer → badge
   const heroCards = seats.children[0].children[0];
@@ -185,7 +185,7 @@ test('操作栏会轮到自己时出现按钮，轮到机器人时显示等待',
 
 test('连续打完多手牌不会崩，且筹码守恒', () => {
   debug.stop();
-  const initialTotal = 6 * 2000;
+  const initialTotal = 6 * 200;
 
   for (let hand = 0; hand < 5; hand++) {
     debug.newHand();
@@ -211,7 +211,7 @@ test('连续打完多手牌不会崩，且筹码守恒', () => {
     const total = state.seats.reduce((sum, s) => sum + s.stack, 0);
     assert.ok(total >= initialTotal, `第 ${hand + 1} 手之后筹码不该减少`);
     assert.equal(
-      (total - initialTotal) % 2000,
+      (total - initialTotal) % 200,
       0,
       `第 ${hand + 1} 手之后多出来的筹码应该正好是补码`
     );
@@ -378,6 +378,52 @@ function findAll(node, predicate, out = []) {
   return out;
 }
 
+test('输光后自动补码会让玩家看见，并计入累计买入', () => {
+  debug.stop();
+  debug.newHand();
+
+  // 先把这一手打完，避免留下"未结清"的投入 —— 中途清空筹码的话，
+  // 开新局时会把已经投入底池的筹码退回来，反而不会触发补码。
+  let guard = 0;
+  while (!debug.isHandOver() && guard++ < 400) {
+    const live = debug.getState();
+    if (live.seats[live.toAct].isHuman) {
+      const legal = debug.legal();
+      debug.humanAct(legal.canCheck ? 'check' : 'call');
+    } else if (!debug.botAct()) {
+      break;
+    }
+  }
+
+  const before = debug.getState().seats[0];
+  before.stack = 0;
+  before.committed = 0;
+  before.streetBet = 0;
+
+  debug.newHand();
+
+  // 补码之后还要下盲注，所以只会比 200 少一点
+  const after = debug.getState().seats[0];
+  assert.ok(after.stack >= 198, `应该补满到起始筹码附近，实际 ${after.stack}`);
+  const toast = byId.get('toast');
+  assert.ok(toast.textContent.includes('自动补入'), `应该有补码提示：${toast.textContent}`);
+  assert.ok(toast.classList.contains('show'), '提示应该是可见状态');
+
+  // 打开筹码面板，累计买入应该已经翻倍
+  byId.get('btn-chips').dispatch('click');
+  const body = byId.get('chip-body');
+  assert.ok(body.textContent.includes('累计买入'), '面板里应该有累计买入');
+  assert.ok(body.textContent.includes('400'), `累计买入应该是两次买入：${body.textContent}`);
+  assert.ok(body.textContent.includes('净变化'), '面板里应该有净变化');
+
+  const chart = findFirst(body, (n) => n.classList.contains('chip-chart'));
+  assert.ok(chart, '应该有走势图容器');
+
+  debug.stop();
+  debug.newHand();
+  debug.stop();
+});
+
 test('翻牌前的快捷加注按钮按大盲计', () => {
   debug.stop();
 
@@ -395,14 +441,17 @@ test('翻牌前的快捷加注按钮按大盲计', () => {
   const bar = byId.get('actionbar');
   const raise = bar
     .findButtons()
-    .find((b) => b.textContent.includes('加注') || b.textContent.includes('下注'));
-  assert.ok(raise, '轮到自己时应该能加注');
+    .find((b) => !b.disabled && (b.textContent.includes('加注') || b.textContent.includes('下注')));
+  const state = debug.getState();
+  const debugInfo =
+    `legal=${JSON.stringify(debug.legal())} currentBet=${state.currentBet} ` +
+    `toAct=${state.toAct} cannotRaise=${JSON.stringify(state.cannotRaise)}`;
+  assert.ok(raise, `轮到自己时应该能加注；${debugInfo}`);
   raise.dispatch('click');
 
   const labels = bar.findButtons().map((b) => b.textContent);
-  assert.ok(labels.includes('全下'), `快捷按钮里应该有全下，实际：${labels}`);
+  assert.ok(labels.includes('全下'), `快捷按钮里应该有全下，实际：${labels} ${debugInfo}`);
 
-  const state = debug.getState();
   if (state.currentBet <= state.config.bigBlind) {
     // 还没人加注：按大盲说话
     for (const want of ['2.5BB', '3BB', '4BB']) {
