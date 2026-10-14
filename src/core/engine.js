@@ -103,6 +103,19 @@ export function createTable(options = {}) {
         wins: 0,
         peak: config.startingStack,
         low: config.startingStack,
+        /**
+         * 可观察到的行为统计。机器人靠它推断"这个对手是什么类型"，
+         * 然后针对性地调整。刻意放在引擎里 —— 联机时服务端能直接同步，
+         * 而且它是从公开动作里统计出来的，不含任何隐藏信息。
+         */
+        observation: {
+          vpip: 0, // 主动投钱进池的牌局数（跟注或加注，不含盲注）
+          pfr: 0, // 翻前加注的牌局数
+          facedBet: 0, // 翻后面临下注的次数
+          foldedToBet: 0, // 其中弃牌
+          calledBet: 0, // 其中跟注
+          bets: 0, // 翻后主动下注/加注次数
+        },
       })),
     },
     handNumber: 0,
@@ -271,6 +284,7 @@ export function startHand(prev, rng = defaultRng()) {
     seat.hasActed = false;
     seat.lastAction = null;
     seat.startStack = seat.stack;
+    seat.voluntaryThisHand = false;
     if (seat.inHand) state.session.seats[seat.index].dealtIn += 1;
   }
 
@@ -587,6 +601,36 @@ function commit(state, seat, amount) {
  * "这是一个新动作"，从而重新播放动画 —— 光看文字会因为连续两次
  * 相同的「跟注」而漏掉第二次。
  */
+/**
+ * 统计可观察到的行为。机器人靠这些数据判断对手类型 ——
+ * 全部来自公开动作，不含任何隐藏信息。
+ */
+function observe(state, seat, kind, amount) {
+  const obs = state.session?.seats?.[seat.index]?.observation;
+  if (!obs) return;
+
+  if (state.phase === PHASES.PREFLOP) {
+    if (kind === 'call' || kind === 'raise' || kind === 'allIn') {
+      if (!seat.voluntaryThisHand) {
+        seat.voluntaryThisHand = true;
+        obs.vpip += 1;
+      }
+    }
+    if (kind === 'raise' || kind === 'allIn') obs.pfr += 1;
+    return;
+  }
+
+  // 翻后：区分"主动下注"和"面对下注后怎么应对"
+  if (kind === 'raise' || kind === 'allIn') obs.bets += 1;
+  if (kind === 'fold' && seat.streetBet < state.currentBet) {
+    obs.facedBet += 1;
+    obs.foldedToBet += 1;
+  } else if (kind === 'call' && amount > 0) {
+    obs.facedBet += 1;
+    obs.calledBet += 1;
+  }
+}
+
 function recordAction(state, seat, label, amount, kind) {
   state.actionSeq = (state.actionSeq ?? 0) + 1;
   seat.lastAction = {
@@ -601,6 +645,7 @@ function recordAction(state, seat, label, amount, kind) {
   if (Array.isArray(state.handActions)) {
     state.handActions.push({ street: state.phase, seat: seat.index, kind });
   }
+  observe(state, seat, kind, amount);
   state.events.push({ type: 'action', seat: seat.index, action: label, amount });
   state.log.push({ hand: state.handNumber, text: `${seat.name} ${amount !== undefined ? `${label} ${amount}` : label}` });
 }

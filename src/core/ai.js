@@ -14,6 +14,7 @@ import { estimateEquityVsRanges, opponentRangeWeights } from './equity.js';
 import { ACTION_TYPES, PHASES, getLegalActions, totalPot } from './engine.js';
 import { preflopAdvice } from './preflop.js';
 import { solveRiverForState } from './river-solver.js';
+import { readOpponent } from './adapt.js';
 import {
   betPlan,
   boardTexture,
@@ -240,6 +241,12 @@ export function decideBotAction(state, seatIdx, rng = Math.random) {
     seat: seatIdx,
     amount: raiseTarget(state, legal, fraction, pot, rng, aggression),
   });
+
+  // 读对手：他是不是过度弃牌、是不是太上头、入池是不是太松。
+  // 样本不足时返回中性值（三个倍率都是 1），不会乱调。
+  // 实验开关：HOLDEM_NO_ADAPT=1 关掉针对玩家的调整，用来做 A/B 对照。
+  const adaptOff = typeof process !== 'undefined' && process.env?.HOLDEM_NO_ADAPT === '1';
+  const adapt = adaptOff ? { bluff: 1, value: 1, callDown: 1, note: null } : readOpponent(state, seatIdx);
   const call = () => ({
     type: legal.canCheck ? ACTION_TYPES.CHECK : ACTION_TYPES.CALL,
     seat: seatIdx,
@@ -310,7 +317,7 @@ export function decideBotAction(state, seatIdx, rng = Math.random) {
     // 频率沿用原来那套（实测合格的），只把**尺度**换成按牌面算出来的。
     // 之前把频率一起改了，结果下注率从 51% 掉到 34%、三档防守全部变成
     // "弃牌过多" —— 频率和尺度必须分开动。
-    if (decent && legal.canRaise && rng() < 0.5 + 0.35 * aggression) {
+    if (decent && legal.canRaise && rng() < (0.5 + 0.35 * aggression) * adapt.value) {
       return raise(thinSize);
     }
     // 牌力不足时也要以一定频率下注 —— 下注不只为价值，也是为了不让对手
@@ -319,7 +326,7 @@ export function decideBotAction(state, seatIdx, rng = Math.random) {
     // 诊断开关：HOLDEM_FLAT_BLUFF=1 时诈唬固定用半池（改动前的做法），
     // 用来验证"两极化尺度把诈唬挪出了中等档"这个机制。浏览器里没有 process。
     const flatBluff = typeof process !== 'undefined' && process.env?.HOLDEM_FLAT_BLUFF === '1';
-    if (legal.canRaise && rng() < 0.2 + 0.35 * bluff) {
+    if (legal.canRaise && rng() < (0.2 + 0.35 * bluff) * adapt.bluff) {
       return raise(flat || flatBluff ? 0.55 : plan.fraction);
     }
     return call();
@@ -327,7 +334,9 @@ export function decideBotAction(state, seatIdx, rng = Math.random) {
 
   // 面对下注：对手主动下注说明他的牌强于随机牌，所以门槛要加一层保证金
   const betRatio = Math.min(2, legal.toCall / Math.max(1, pot));
-  const margin = 0.02 + 0.07 * Math.min(1, betRatio) + 0.03 * (1 - tightness);
+  // 对手反击越凶，越愿意跟注摊牌 —— 把要求的胜率门槛按 callDown 降低。
+  const margin =
+    (0.02 + 0.07 * Math.min(1, betRatio) + 0.03 * (1 - tightness)) / adapt.callDown;
 
   if (equity() < potOdds + margin) {
     if (legal.canRaise && rng() < bluff * 0.07) return raise(0.75);
