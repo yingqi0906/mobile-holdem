@@ -793,6 +793,24 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* 金额可以直接手输 —— 滑块和快捷按钮负责快速调，键盘负责精确值 */
+.bet-input {
+  width: 108px;
+  padding: 2px 8px;
+  text-align: right;
+  border: 1px solid rgba(242, 197, 61, 0.35);
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.32);
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+  outline: none;
+}
+
+.bet-input:focus {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 2px rgba(242, 197, 61, 0.22);
+}
+
 .bet-slider {
   width: 100%;
   margin: 0 0 10px;

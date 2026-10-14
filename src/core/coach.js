@@ -35,10 +35,14 @@ const SOLVER_ACTION = {
   fold: ACTION_TYPES.FOLD,
   check: ACTION_TYPES.CHECK,
   call: ACTION_TYPES.CALL,
-  bet: ACTION_TYPES.RAISE,
   raise: ACTION_TYPES.RAISE,
   allin: ACTION_TYPES.ALL_IN,
 };
+
+/** 求解器返回的动作名可能是 bet-0.33 这种带尺度的写法。 */
+function solverActionOf(name) {
+  return SOLVER_ACTION[name] ?? (name.startsWith('bet') ? ACTION_TYPES.RAISE : ACTION_TYPES.CHECK);
+}
 
 /** 跟注的期望值。P 是当下桌上的全部筹码，C 是要跟的额度。 */
 function callEV(equity, pot, toCall) {
@@ -98,11 +102,11 @@ export function advise(state, seatIdx, rng = Math.random) {
       const [bestName, bestP] = ranked[0];
       const spec = solved.actions.find((a) => a.name === bestName);
       const mixText = ranked
-        .map(([n, p]) => `${ACTION_LABEL[SOLVER_ACTION[n]] ?? n} ${pct(p)}`)
+        .map(([n, p]) => `${ACTION_LABEL[solverActionOf(n)] ?? n} ${pct(p)}`)
         .join('／');
       return {
         street: '河牌（CFR 求解）',
-        action: SOLVER_ACTION[bestName] ?? ACTION_TYPES.CHECK,
+        action: solverActionOf(bestName),
         amount: spec?.amount,
         fraction: bestName === 'bet' ? spec?.amount / Math.max(1, pot) : undefined,
         handClass: handClass(seat.hole),

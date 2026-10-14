@@ -82,7 +82,7 @@ function actionFromStrategy(solved, legal, seatIdx, rng) {
     if (name === 'allin' && legal.canRaise) {
       return { type: ACTION_TYPES.ALL_IN, seat: seatIdx };
     }
-    if ((name === 'bet' || name === 'raise') && legal.canRaise) {
+    if ((name.startsWith('bet') || name === 'raise') && legal.canRaise) {
       return {
         type: ACTION_TYPES.RAISE,
         seat: seatIdx,

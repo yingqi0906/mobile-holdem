@@ -31,8 +31,25 @@ const CHAR_RANK = new Map(RANK_CHAR.map((c, i) => [c, i + 2]));
 export const RIVER_LIMITS = {
   MAX_CLASSES: 20, // 每边保留权重最高的若干类别
   ITERATIONS: 700,
-  BET_FRACTIONS: [0.75, Infinity], // Infinity 表示全下
+  // 三个尺度。之前只有「3/4 池」和「全下」两档，求解器想下注时只能在这
+  // 两者里挑，结果实测河牌下注有 57% 是全下 —— 那是抽象太粗造成的，
+  // 不是策略偏好。加上小注档才有得选。
+  BET_FRACTIONS: [0.33, 0.75, Infinity], // Infinity 表示全下
 };
+
+/**
+ * 这一注能用哪些尺度。
+ *
+ * 之前无条件把「全下」放进选项里，实测河牌有 57% 的下注是全下。根因不是
+ * 档位太少，而是**尺度算错了**：河牌时底池常常很小（前面几条街都下小注），
+ * 拿全下去比就是九倍底池的超池，模型里对手只能弃牌，全下于是变成"总是赚"。
+ *
+ * 所以底池相对筹码太小时不提供全下，改用一个正常尺寸的超池。
+ */
+function betSizesFor(pot, stack) {
+  const spr = stack / Math.max(1, pot);
+  return spr <= 3 ? [0.33, 0.75, Infinity] : [0.33, 0.75, 1.25];
+}
 
 const RANK_OF_CLASS = new Map(HAND_RANK.map((h, i) => [h, i]));
 
@@ -109,13 +126,13 @@ function topClasses(weights, limit) {
  * @param {object} ctx {potStart, inv0, inv1, stack0, stack1}
  * @param {boolean} heroCanCheck 英雄过牌后这条街是否直接结束
  */
-function buildNode(actor, ctx, opponentChecked) {
+function buildNode(actor, ctx, opponentChecked, sizes) {
   const actions = [];
   const stack = actor === 0 ? ctx.stack0 : ctx.stack1;
   const myInv = actor === 0 ? ctx.inv0 : ctx.inv1;
 
   const advance = (name, amount, nextActor, nextCtx, nextChecked) => {
-    actions.push({ name, amount, child: buildNode(nextActor, nextCtx, nextChecked) });
+    actions.push({ name, amount, child: buildNode(nextActor, nextCtx, nextChecked, sizes) });
   };
 
   const facing = (actor === 0 ? ctx.inv1 : ctx.inv0) - myInv;
@@ -136,7 +153,7 @@ function buildNode(actor, ctx, opponentChecked) {
       actions.push({
         name: 'raise',
         amount: raiseTo,
-        child: buildNode(1 - actor, nextStack, false),
+        child: buildNode(1 - actor, nextStack, false, sizes),
       });
     }
     return { kind: 'dec', player: actor, actions };
@@ -148,18 +165,20 @@ function buildNode(actor, ctx, opponentChecked) {
     actions.push({ name: 'check', child: { kind: 'showdown', ctx } });
   } else {
     const nextChecked = true;
-    actions.push({ name: 'check', child: buildNode(1 - actor, ctx, nextChecked) });
+    actions.push({ name: 'check', child: buildNode(1 - actor, ctx, nextChecked, sizes) });
   }
 
-  for (const fraction of RIVER_LIMITS.BET_FRACTIONS) {
+  for (const fraction of sizes) {
     const size = fraction === Infinity ? stack : Math.min(stack, Math.round((ctx.potStart + ctx.inv0 + ctx.inv1) * fraction));
     if (size <= 0) continue;
     const allIn = size >= stack;
     const nextCtx = actor === 0
       ? { ...ctx, inv0: ctx.inv0 + size, stack0: ctx.stack0 - size }
       : { ...ctx, inv1: ctx.inv1 + size, stack1: ctx.stack1 - size };
-    const name = allIn ? 'allin' : 'bet';
-    actions.push({ name, amount: size, child: buildNode(1 - actor, nextCtx, false) });
+    // 名字必须带上尺度：之前两档都叫 bet，写进策略对象时后一个把前一个
+    // 覆盖掉了 —— 概率之和不再等于 1，而且有一档尺度直接消失。
+    const name = allIn ? 'allin' : `bet-${fraction}`;
+    actions.push({ name, amount: size, child: buildNode(1 - actor, nextCtx, false, sizes) });
   }
   return { kind: 'dec', player: actor, actions };
 }
@@ -356,7 +375,8 @@ export function solveRiver(opts) {
   const root = buildNode(
     0,
     { potStart, inv0: heroInvested, inv1: oppInvested, stack0: heroStack, stack1: oppStack },
-    opponentChecked
+    opponentChecked,
+    betSizesFor(potStart + heroInvested + oppInvested, Math.min(heroStack, oppStack))
   );
   if (root.kind !== 'dec' || root.actions.length === 0) return null;
 

@@ -22,7 +22,7 @@ import { bestFive } from '../core/evaluator.js';
 import { createCryptoRng } from '../core/rng.js';
 
 /** 每次发布时改一下这个号，界面上能看到，方便确认自己加载的是哪一版。 */
-const BUILD = 'v0.20';
+const BUILD = 'v0.21';
 
 const CONFIG = {
   smallBlind: 1,
@@ -509,7 +509,13 @@ function buildBetPanel(legal) {
   const panel = el('div', 'bet-panel');
   const head = el('div', 'bet-head');
   const label = el('span', 'label');
-  const value = el('span', 'value');
+  // 大号数字直接可以点进去手输。滑块和快捷按钮适合快速调整，
+  // 但想下"正好 137"这种精确数额时只能靠键盘。
+  const value = document.createElement('input');
+  value.type = 'text';
+  value.inputMode = 'numeric';
+  value.autocomplete = 'off';
+  value.className = 'value bet-input';
   head.append(label, value);
 
   const slider = document.createElement('input');
@@ -542,10 +548,31 @@ function buildBetPanel(legal) {
         : ((v - legal.minRaiseTo) / (legal.maxRaiseTo - legal.minRaiseTo)) * 100;
     slider.style.setProperty('--fill', `${pct}%`);
     label.textContent = v >= legal.maxRaiseTo ? '全下' : state.currentBet > 0 ? '加注到' : '下注';
-    value.textContent = String(v);
+    // 输入框正在打字时不回写，否则光标会被顶走、也没法连续输入
+    if (value.value !== String(v) && value !== document.activeElement) {
+      value.value = String(v);
+    }
     const confirm = document.getElementById('bet-confirm');
     if (confirm) confirm.textContent = `确认 ${v}`;
   }
+
+  value.addEventListener('input', () => {
+    const digits = value.value.replace(/[^\d]/g, '');
+    if (digits !== value.value) value.value = digits;
+    const n = Number(digits);
+    if (!Number.isFinite(n) || n <= 0) return;
+    // 打字过程中只夹到合法区间去更新滑块，不回写输入框
+    slider.value = String(clamp(n, legal.minRaiseTo, legal.maxRaiseTo));
+    syncPanel();
+  });
+  value.addEventListener('blur', () => {
+    const n = Number(value.value.replace(/[^\d]/g, ''));
+    const safe = Number.isFinite(n) && n > 0 ? clamp(n, legal.minRaiseTo, legal.maxRaiseTo) : betPanel.value;
+    betPanel.value = safe;
+    value.value = String(safe);
+    slider.value = String(safe);
+    syncPanel();
+  });
 
   slider.addEventListener('input', syncPanel);
   panel.append(head, slider, presets);
