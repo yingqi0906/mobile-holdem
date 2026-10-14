@@ -54,10 +54,19 @@ test('求解速度要能在运行时用', () => {
   assert.ok(elapsed < 1500, `单次求解应该远快于 1.5 秒，实际 ${elapsed}ms`);
 });
 
-test('不在范围内或者不是河牌时返回 null', () => {
-  // 54o 不在前 25% 范围里
-  assert.equal(solve('54o'), null);
-  // 只发到翻牌不能求解
+test('手牌不在假设范围里也会被补进去求解', () => {
+  // 54o 不在前 25% 的近似范围里。之前这种情况直接求解失败（覆盖率只有 65%），
+  // 现在会把英雄的实际手牌补进范围 —— 否则"范围模型不够准"会一直拖累求解。
+  const result = solve('54o');
+  assert.ok(result, '英雄的实际手牌应该总是能求解');
+  const total = Object.values(result.strategy).reduce((a, b) => a + b, 0);
+  assert.ok(Math.abs(total - 1) < 1e-6);
+});
+
+test('翻牌/转牌不求解 —— 试过，结果是错的', () => {
+  // 翻牌子树只走一轮下注、对手范围收窄不足，求解器会收敛到
+  // "反正对手会弃牌就无脑全下"。与其给个看起来合理实则错误的结果，
+  // 不如明确拒绝，让上层回落到范围感知的启发式。
   assert.equal(
     solveRiver({
       board: parseCards('Qs 7d 2c'),

@@ -18,6 +18,7 @@
  */
 
 import { evaluateBest } from './evaluator.js';
+import { freshDeck } from './cards.js';
 import { HAND_RANK } from './hand-rank.js';
 import { getLegalActions, totalPot } from './engine.js';
 import { opponentRangeWeights, selfRangeWeights } from './equity.js';
@@ -62,6 +63,9 @@ function combosOfClass(cls, board) {
 /**
  * 胜负矩阵：heroWin[i][j] 是我方第 i 类对抗对手第 j 类的胜率（平局算一半）。
  * 组合撞车时跳过 —— 这就是挡牌效应。
+ *
+ * 河牌用真实牌力直接比；翻牌和转牌还没有发完，就抽样补完公共牌、比最终牌力，
+ * 得到的是"打到河牌的胜率"。后者让求解器在翻牌/转牌也能算进听牌的价值。
  */
 function buildShowdownMatrix(heroClasses, oppClasses, board) {
   const hc = heroClasses.map((c) => combosOfClass(HAND_RANK[c], board));
@@ -327,12 +331,24 @@ export function solveRiver(opts) {
     opponentChecked = false,
     iterations = RIVER_LIMITS.ITERATIONS,
   } = opts;
+  // 只解河牌。翻牌/转牌试过 —— 终局只走一轮下注、对手范围收窄不足，
+  // 求解器会收敛到"反正对手会弃牌就无脑全下"，那个结果是错的，所以不做。
   if (board.length !== 5) return null;
 
   const heroTop = topClasses(heroWeights, RIVER_LIMITS.MAX_CLASSES);
   const oppTop = topClasses(oppWeights, RIVER_LIMITS.MAX_CLASSES);
-  const heroIdx = heroTop.classes.indexOf(heroClass);
-  if (heroIdx < 0 || oppTop.classes.length === 0) return null;
+  if (oppTop.classes.length === 0) return null;
+
+  // 英雄自己的范围是"按胜率取前 X%"近似出来的，未必包含他手里实际那两张牌。
+  // 不包含就直接求解失败 —— 所以这里把它补进去，给一个小权重。
+  let heroIdx = heroTop.classes.indexOf(heroClass);
+  if (heroIdx < 0) {
+    heroTop.classes = [...heroTop.classes, heroClass].slice(0, RIVER_LIMITS.MAX_CLASSES + 1);
+    heroTop.weights = [...heroTop.weights, 0.3];
+    const total = heroTop.weights.reduce((a, b) => a + b, 0);
+    heroTop.weights = heroTop.weights.map((w) => w / total);
+    heroIdx = heroTop.classes.length - 1;
+  }
 
   const heroWin = buildShowdownMatrix(heroTop.classes, oppTop.classes, board);
   const potStart = Math.max(0, pot - heroInvested - oppInvested);
@@ -443,5 +459,6 @@ export function solveRiverForState(state, seatIdx, options = {}) {
     heroIsFirst,
     opponentChecked,
     iterations: options.iterations,
+    rng: options.rng,
   });
 }
