@@ -285,18 +285,23 @@ export function decideBotAction(state, seatIdx, rng = Math.random) {
       aggression,
       bluff,
     });
+    // A/B 开关：HOLDEM_FLAT_SIZING=1 恢复改动前的固定尺度，
+    // 用来量化"按牌面选尺度"到底有没有让 AI 变强。浏览器里没有 process。
+    const flat = typeof process !== 'undefined' && process.env?.HOLDEM_FLAT_SIZING === '1';
+    const valueSize = flat ? 0.55 + 0.3 * aggression : plan.fraction;
+    const thinSize = flat ? 0.45 + 0.2 * aggression : plan.fraction * 0.8;
     const strong = eq > 0.68 + 0.08 * tightness;
     const decent = eq > 0.5;
 
     if (strong && legal.canRaise) {
       if (rng() < 0.2) return call(); // 偶尔慢打，别让"加注=大牌"太好读
-      return raise(plan.fraction);
+      return raise(valueSize);
     }
     // 频率沿用原来那套（实测合格的），只把**尺度**换成按牌面算出来的。
     // 之前把频率一起改了，结果下注率从 51% 掉到 34%、三档防守全部变成
     // "弃牌过多" —— 频率和尺度必须分开动。
     if (decent && legal.canRaise && rng() < 0.5 + 0.35 * aggression) {
-      return raise(plan.fraction * 0.8);
+      return raise(thinSize);
     }
     // 牌力不足时也要以一定频率下注 —— 下注不只为价值，也是为了不让对手
     // 随便过牌看免费牌。诈唬用和强牌一样的尺度（两极化），这样对手没法
@@ -305,7 +310,7 @@ export function decideBotAction(state, seatIdx, rng = Math.random) {
     // 用来验证"两极化尺度把诈唬挪出了中等档"这个机制。浏览器里没有 process。
     const flatBluff = typeof process !== 'undefined' && process.env?.HOLDEM_FLAT_BLUFF === '1';
     if (legal.canRaise && rng() < 0.2 + 0.35 * bluff) {
-      return raise(flatBluff ? 0.5 : plan.fraction);
+      return raise(flat || flatBluff ? 0.55 : plan.fraction);
     }
     return call();
   }
@@ -319,12 +324,13 @@ export function decideBotAction(state, seatIdx, rng = Math.random) {
     return fold();
   }
   if (equity() > 0.8 && legal.canRaise && rng() < 0.45 + 0.45 * aggression) {
+    const flat = typeof process !== 'undefined' && process.env?.HOLDEM_FLAT_SIZING === '1';
     const raiseSize = raisePlan({
       texture: boardTexture(state.board),
       advantage: rangeAdvantage(state, seatIdx),
       aggression,
     });
-    return raise(raiseSize.fraction);
+    return raise(flat ? 0.65 + 0.35 * aggression : raiseSize.fraction);
   }
   if (legal.canRaise && equity() > potOdds + margin + 0.2 && rng() < 0.2 + 0.45 * aggression) {
     return raise(0.6);
