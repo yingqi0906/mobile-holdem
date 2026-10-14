@@ -27,7 +27,8 @@ function combosOf(cls) {
   if (cls.length === 2) return 6;
   return cls.endsWith('s') ? 4 : 12;
 }
-const CLASS_COMBOS = HAND_RANK.map(combosOf);
+/** 每个手牌类别的组合数，按类别加权统计时要乘上它。 */
+export const CLASS_COMBOS = HAND_RANK.map(combosOf);
 
 function classIndexOf(cards) {
   const [a, b] = cards;

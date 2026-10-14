@@ -14,7 +14,13 @@ import { estimateEquityVsRanges, opponentRangeWeights } from './equity.js';
 import { ACTION_TYPES, PHASES, getLegalActions, totalPot } from './engine.js';
 import { preflopAdvice } from './preflop.js';
 import { solveRiverForState } from './river-solver.js';
-import { betPlan, boardTexture, raisePlan, rangeAdvantage } from './postflop.js';
+import {
+  betPlan,
+  boardTexture,
+  nutAdvantage,
+  raisePlan,
+  rangeAdvantage,
+} from './postflop.js';
 import { createSeededRng } from './rng.js';
 
 export const BOT_PRESETS = {
@@ -284,6 +290,8 @@ export function decideBotAction(state, seatIdx, rng = Math.random) {
     const plan = betPlan({
       texture,
       advantage: rangeAdvantage(state, seatIdx),
+      nutAdvantage: nutAdvantage(state, seatIdx),
+      street: state.phase,
       aggression,
       bluff,
     });
