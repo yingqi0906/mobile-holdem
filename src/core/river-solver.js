@@ -423,6 +423,9 @@ export function solveRiver(opts) {
  * 暂时回落到启发式。局面不适合求解时返回 null。
  */
 export function solveRiverForState(state, seatIdx, options = {}) {
+  // 实验开关：HOLDEM_NO_SOLVER=1 时整条求解路径关闭，用来做 A/B 对照。
+  // 浏览器里没有 process，所以这个开关对线上没有任何影响。
+  if (typeof process !== 'undefined' && process.env?.HOLDEM_NO_SOLVER === '1') return null;
   if (state.board.length !== 5) return null;
   const legal = getLegalActions(state, seatIdx);
   if (!legal) return null;

@@ -301,7 +301,12 @@ export function decideBotAction(state, seatIdx, rng = Math.random) {
     // 牌力不足时也要以一定频率下注 —— 下注不只为价值，也是为了不让对手
     // 随便过牌看免费牌。诈唬用和强牌一样的尺度（两极化），这样对手没法
     // 靠尺度读牌。
-    if (legal.canRaise && rng() < 0.2 + 0.35 * bluff) return raise(plan.fraction);
+    // 诊断开关：HOLDEM_FLAT_BLUFF=1 时诈唬固定用半池（改动前的做法），
+    // 用来验证"两极化尺度把诈唬挪出了中等档"这个机制。浏览器里没有 process。
+    const flatBluff = typeof process !== 'undefined' && process.env?.HOLDEM_FLAT_BLUFF === '1';
+    if (legal.canRaise && rng() < 0.2 + 0.35 * bluff) {
+      return raise(flatBluff ? 0.5 : plan.fraction);
+    }
     return call();
   }
 
