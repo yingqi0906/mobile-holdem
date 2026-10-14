@@ -16,7 +16,7 @@
 
 import { ACTION_TYPES, PHASES, getLegalActions, totalPot } from './engine.js';
 import { estimateEquity } from './ai.js';
-import { estimateEquityVsRanges, opponentRangeWidths } from './equity.js';
+import { estimateEquityVsRanges, opponentRangeWeights } from './equity.js';
 import { handClass, preflopAdvice } from './preflop.js';
 
 const ACTION_LABEL = {
@@ -85,7 +85,7 @@ export function advise(state, seatIdx, rng = Math.random) {
   const equity = estimateEquityVsRanges(
     seat.hole,
     state.board,
-    opponentRangeWidths(state, seatIdx),
+    opponentRangeWeights(state, seatIdx),
     420,
     rng
   );

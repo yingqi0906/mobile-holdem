@@ -118,6 +118,11 @@ export function createTable(options = {}) {
     raiseCount: 0,
     /** 这一条街的行动顺序（谁做了什么）。翻前策略靠它还原局面去查范围表。 */
     streetActions: [],
+    /**
+     * 整手牌的完整行动序列（带街名）。逐街范围收窄要靠它重放，
+     * 因为 streetActions 每到新街就清空了。
+     */
+    handActions: [],
     pendingActors: [],
     cannotRaise: [],
     toAct: null,
@@ -251,6 +256,7 @@ export function startHand(prev, rng = defaultRng()) {
   state.minRaise = state.config.bigBlind;
   state.raiseCount = 0;
   state.streetActions = [];
+  state.handActions = [];
   state.cannotRaise = [];
   state.lastAggressor = null;
   state.phase = PHASES.PREFLOP;
@@ -591,6 +597,9 @@ function recordAction(state, seat, label, amount, kind) {
   // 记下这一条街的完整行动顺序，翻前策略要靠它还原局面
   if (Array.isArray(state.streetActions)) {
     state.streetActions.push({ seat: seat.index, kind });
+  }
+  if (Array.isArray(state.handActions)) {
+    state.handActions.push({ street: state.phase, seat: seat.index, kind });
   }
   state.events.push({ type: 'action', seat: seat.index, action: label, amount });
   state.log.push({ hand: state.handNumber, text: `${seat.name} ${amount !== undefined ? `${label} ${amount}` : label}` });

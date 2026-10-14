@@ -10,7 +10,7 @@
 
 import { freshDeck, rankOf, suitOf } from './cards.js';
 import { evaluateBest } from './evaluator.js';
-import { estimateEquityVsRanges, opponentRangeWidths } from './equity.js';
+import { estimateEquityVsRanges, opponentRangeWeights } from './equity.js';
 import { ACTION_TYPES, PHASES, getLegalActions, totalPot } from './engine.js';
 import { preflopAdvice } from './preflop.js';
 import { createSeededRng } from './rng.js';
@@ -171,8 +171,8 @@ export function decideBotAction(state, seatIdx, rng = Math.random) {
       const iterations = iterationsFor(state.phase, opponents);
       // 对抗「范围」而不是对抗随机牌 —— 对手加注时他的牌远强于随机牌，
       // 用随机牌算胜率会系统性高估，表现出来就是跟注过多。
-      const widths = opponentRangeWidths(state, seatIdx);
-      const sample = estimateEquityVsRanges(seat.hole, state.board, widths, iterations, rng);
+      const ranges = opponentRangeWeights(state, seatIdx);
+      const sample = estimateEquityVsRanges(seat.hole, state.board, ranges, iterations, rng);
       equityCache = clamp(sample + (rng() - 0.5) * 0.04, 0, 1);
     }
     return equityCache;
