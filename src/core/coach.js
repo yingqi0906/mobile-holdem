@@ -17,6 +17,7 @@
 import { ACTION_TYPES, PHASES, getLegalActions, totalPot } from './engine.js';
 import { estimateEquity } from './ai.js';
 import { estimateEquityVsRanges, opponentRangeWeights } from './equity.js';
+import { solveRiverForState } from './river-solver.js';
 import { handClass, preflopAdvice } from './preflop.js';
 
 const ACTION_LABEL = {
@@ -28,6 +29,15 @@ const ACTION_LABEL = {
 };
 
 const pct = (x) => `${(x * 100).toFixed(0)}%`;
+
+const SOLVER_ACTION = {
+  fold: ACTION_TYPES.FOLD,
+  check: ACTION_TYPES.CHECK,
+  call: ACTION_TYPES.CALL,
+  bet: ACTION_TYPES.RAISE,
+  raise: ACTION_TYPES.RAISE,
+  allin: ACTION_TYPES.ALL_IN,
+};
 
 /** 跟注的期望值。P 是当下桌上的全部筹码，C 是要跟的额度。 */
 function callEV(equity, pot, toCall) {
@@ -77,6 +87,36 @@ export function advise(state, seatIdx, rng = Math.random) {
       potOdds,
       equity: null,
     };
+  }
+
+  // 河牌：单挑时交给 CFR 求解器，给出真正的均衡策略（含混合频率）
+  if (state.phase === PHASES.RIVER) {
+    const solved = solveRiverForState(state, seatIdx, { iterations: 450 });
+    if (solved) {
+      const ranked = Object.entries(solved.strategy).sort((a, b) => b[1] - a[1]);
+      const [bestName, bestP] = ranked[0];
+      const spec = solved.actions.find((a) => a.name === bestName);
+      const mixText = ranked
+        .map(([n, p]) => `${ACTION_LABEL[SOLVER_ACTION[n]] ?? n} ${pct(p)}`)
+        .join('／');
+      return {
+        street: '河牌（CFR 求解）',
+        action: SOLVER_ACTION[bestName] ?? ACTION_TYPES.CHECK,
+        amount: spec?.amount,
+        fraction: bestName === 'bet' ? spec?.amount / Math.max(1, pot) : undefined,
+        handClass: handClass(seat.hole),
+        solver: true,
+        strategy: solved.strategy,
+        equity: null,
+        pot,
+        toCall,
+        reasons: [
+          `均衡策略：${mixText}`,
+          `底池 ${pot}${toCall > 0 ? `，需要跟 ${toCall}` : '，无人下注'}`,
+          '这是按双方范围做 CFR 求解得到的，已经算进对手的反应',
+        ],
+      };
+    }
   }
 
   const opponents = state.seats.filter(

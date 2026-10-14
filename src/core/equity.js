@@ -151,6 +151,20 @@ export function opponentRangeWeights(state, seatIdx) {
     });
 }
 
+/**
+ * 算出**某个座位自己**的范围：用他自己的动作去收窄。
+ * 求解器需要双方的范围才能求解。
+ */
+export function selfRangeWeights(state, seat) {
+  const strength = boardStrength(state.board);
+  let w = initialWeights(preflopWidth(state, seat));
+  for (const act of state.handActions ?? []) {
+    if (act.street === 'preflop' || act.seat !== seat.index) continue;
+    w = narrowByAction(w, act.kind, strength);
+  }
+  return w;
+}
+
 /** 按权重抽样一个手牌类别，再用具体花色兑现成两张牌。 */
 function makeSampler(weights, rng) {
   const cumulative = new Float64Array(CLASSES);

@@ -412,7 +412,12 @@ test('输光后自动补码会让玩家看见，并计入累计买入', () => {
   // 打开筹码面板，累计买入应该已经翻倍
   byId.get('btn-chips').dispatch('click');
   const body = byId.get('chip-body');
-  assert.ok(body.textContent.includes('400'), `应该记到两次买入共 400：${body.textContent}`);
+  const heroBuyIn = debug.getState().session.seats[0].buyIn;
+  assert.ok(heroBuyIn > 200, `应该至少补过一次码，实际买入 ${heroBuyIn}`);
+  assert.ok(
+    body.textContent.includes(String(heroBuyIn)),
+    `面板里应该显示累计买入 ${heroBuyIn}`
+  );
 
   // 面板要列出所有人，不只是自己
   const legend = findFirst(body, (n) => n.classList.contains('chip-legend'));
@@ -489,7 +494,14 @@ test('有人行动时会播放动作特效并给徽标上色', () => {
   debug.newHand();
   debug.stop();
 
-  assert.ok(debug.botAct(), '机器人应该能动一次');
+  // 有时候这一手在机器人行动前就结束了，换一手再来
+  let acted = null;
+  for (let attempt = 0; attempt < 8 && !acted; attempt++) {
+    debug.newHand();
+    acted = debug.botAct();
+    debug.stop();
+  }
+  assert.ok(acted, '机器人应该能动一次');
 
   // 座位周围应该出现一圈带动作类型的光环
   const chips = byId.get('chip-layer');

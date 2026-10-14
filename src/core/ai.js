@@ -13,6 +13,7 @@ import { evaluateBest } from './evaluator.js';
 import { estimateEquityVsRanges, opponentRangeWeights } from './equity.js';
 import { ACTION_TYPES, PHASES, getLegalActions, totalPot } from './engine.js';
 import { preflopAdvice } from './preflop.js';
+import { solveRiverForState } from './river-solver.js';
 import { createSeededRng } from './rng.js';
 
 export const BOT_PRESETS = {
@@ -41,6 +42,52 @@ function iterationsFor(phase, opponents) {
 }
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+/**
+ * 把求解器给出的均衡策略翻译成一个具体行动。
+ * 按频率抽样 —— 这正是"混合策略"该有的样子：同一个局面下有时加注有时跟注。
+ */
+function actionFromStrategy(solved, legal, seatIdx, rng) {
+  const entries = Object.entries(solved.strategy).filter(([, p]) => p > 0.001);
+  if (entries.length === 0) return null;
+
+  let roll = rng();
+  for (const [name, probability] of entries) {
+    roll -= probability;
+    if (roll > 0) continue;
+
+    const spec = solved.actions.find((a) => a.name === name);
+    if (name === 'check') {
+      return legal.canCheck
+        ? { type: ACTION_TYPES.CHECK, seat: seatIdx }
+        : { type: ACTION_TYPES.CALL, seat: seatIdx };
+    }
+    if (name === 'fold') {
+      return legal.canCheck
+        ? { type: ACTION_TYPES.CHECK, seat: seatIdx }
+        : { type: ACTION_TYPES.FOLD, seat: seatIdx };
+    }
+    if (name === 'call') {
+      if (!legal.canCall) return { type: ACTION_TYPES.CHECK, seat: seatIdx };
+      return { type: ACTION_TYPES.CALL, seat: seatIdx };
+    }
+    if (name === 'allin' && legal.canRaise) {
+      return { type: ACTION_TYPES.ALL_IN, seat: seatIdx };
+    }
+    if ((name === 'bet' || name === 'raise') && legal.canRaise) {
+      return {
+        type: ACTION_TYPES.RAISE,
+        seat: seatIdx,
+        amount: clamp(spec?.amount ?? legal.minRaiseTo, legal.minRaiseTo, legal.maxRaiseTo),
+      };
+    }
+    // 行动不合法就退回跟注/过牌
+    return legal.canCheck
+      ? { type: ACTION_TYPES.CHECK, seat: seatIdx }
+      : { type: ACTION_TYPES.CALL, seat: seatIdx };
+  }
+  return null;
+}
 
 /**
  * 蒙特卡洛胜率估算。
@@ -215,6 +262,14 @@ export function decideBotAction(state, seatIdx, rng = Math.random) {
     if (legal.canCheck) return { type: ACTION_TYPES.CHECK, seat: seatIdx };
     if (advice.action === 'call') return { type: ACTION_TYPES.CALL, seat: seatIdx };
     return { type: ACTION_TYPES.FOLD, seat: seatIdx };
+  }
+  // ------------------------------------------------------------ 河牌
+  // 河牌是唯一能在运行时做真求解的一条街 —— 交给 CFR。
+  // 多人底池或者手牌不在假设范围内时求解器返回 null，回落到底下的启发式。
+  if (state.phase === PHASES.RIVER) {
+    const solved = solveRiverForState(state, seatIdx, { iterations: 450 });
+    const chosen = solved ? actionFromStrategy(solved, legal, seatIdx, rng) : null;
+    if (chosen) return chosen;
   }
 
   // ------------------------------------------------------------ 翻牌后
