@@ -22,7 +22,7 @@ import { bestFive } from '../core/evaluator.js';
 import { createCryptoRng } from '../core/rng.js';
 
 /** 每次发布时改一下这个号，界面上能看到，方便确认自己加载的是哪一版。 */
-const BUILD = 'v0.16';
+const BUILD = 'v0.17';
 
 const CONFIG = {
   smallBlind: 1,

@@ -18,6 +18,7 @@ import { ACTION_TYPES, PHASES, getLegalActions, totalPot } from './engine.js';
 import { estimateEquity } from './ai.js';
 import { estimateEquityVsRanges, opponentRangeWeights } from './equity.js';
 import { solveRiverForState } from './river-solver.js';
+import { betPlan, boardTexture, rangeAdvantage } from './postflop.js';
 import { handClass, preflopAdvice } from './preflop.js';
 
 const ACTION_LABEL = {
@@ -134,13 +135,25 @@ export function advise(state, seatIdx, rng = Math.random) {
   const reasons = [`估算胜率 ${pct(equity)}（对抗 ${opponents} 个对手，模拟 420 次）`];
 
   if (legal.canCheck) {
+    const texture = boardTexture(state.board);
+    const advantage = rangeAdvantage(state, seatIdx);
+    const plan = betPlan({ texture, advantage, aggression: 0.55, bluff: 0.15 });
+    const textureName = texture.wetness < 0.2 ? '干燥' : texture.wetness < 0.5 ? '中等' : '湿润';
+    reasons.push(
+      `牌面偏${textureName}（湿润度 ${texture.wetness.toFixed(2)}），` +
+        `范围优势 ${advantage >= 0 ? '+' : ''}${advantage.toFixed(2)}`
+    );
+    reasons.push(
+      `这种牌面的标准打法是下注约 ${Math.round(plan.fraction * 100)}% 底池，频率约 ${Math.round(plan.betFrequency * 100)}%` +
+        (texture.wetness < 0.3 ? '（干燥面用小注高频收池）' : '（湿润面用大注低频，中等牌多过牌）')
+    );
     if (equity > 0.72 && legal.canRaise) {
-      reasons.push(`胜率明显领先，应该下注拿价值`);
-      return { ...base, action: ACTION_TYPES.RAISE, fraction: 0.7, reasons };
+      reasons.push('胜率明显领先，应该下注拿价值');
+      return { ...base, action: ACTION_TYPES.RAISE, fraction: plan.fraction, reasons };
     }
     if (equity > 0.55 && legal.canRaise) {
-      reasons.push(`胜率尚可，可以小额下注，也可以过牌控池`);
-      return { ...base, action: ACTION_TYPES.RAISE, fraction: 0.4, reasons };
+      reasons.push('胜率尚可，可以下注也可以过牌控池');
+      return { ...base, action: ACTION_TYPES.RAISE, fraction: plan.fraction * 0.8, reasons };
     }
     reasons.push(`胜率不高但没有下注压力，过牌看下一张`);
     return { ...base, action: ACTION_TYPES.CHECK, reasons };

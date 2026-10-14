@@ -14,6 +14,7 @@ import { estimateEquityVsRanges, opponentRangeWeights } from './equity.js';
 import { ACTION_TYPES, PHASES, getLegalActions, totalPot } from './engine.js';
 import { preflopAdvice } from './preflop.js';
 import { solveRiverForState } from './river-solver.js';
+import { betPlan, boardTexture, raisePlan, rangeAdvantage } from './postflop.js';
 import { createSeededRng } from './rng.js';
 
 export const BOT_PRESETS = {
@@ -275,20 +276,32 @@ export function decideBotAction(state, seatIdx, rng = Math.random) {
   // ------------------------------------------------------------ 翻牌后
   if (legal.canCheck) {
     const eq = equity();
+    // 尺度不是拍脑袋定的：干燥面小注高频、湿润面大注低频，
+    // 再按"谁的范围在这张牌面上更强"微调频率。
+    const texture = boardTexture(state.board);
+    const plan = betPlan({
+      texture,
+      advantage: rangeAdvantage(state, seatIdx),
+      aggression,
+      bluff,
+    });
     const strong = eq > 0.68 + 0.08 * tightness;
     const decent = eq > 0.5;
 
     if (strong && legal.canRaise) {
       if (rng() < 0.2) return call(); // 偶尔慢打，别让"加注=大牌"太好读
-      return raise(0.55 + 0.3 * aggression);
+      return raise(plan.fraction);
     }
+    // 频率沿用原来那套（实测合格的），只把**尺度**换成按牌面算出来的。
+    // 之前把频率一起改了，结果下注率从 51% 掉到 34%、三档防守全部变成
+    // "弃牌过多" —— 频率和尺度必须分开动。
     if (decent && legal.canRaise && rng() < 0.5 + 0.35 * aggression) {
-      return raise(0.45 + 0.2 * aggression);
+      return raise(plan.fraction * 0.8);
     }
     // 牌力不足时也要以一定频率下注 —— 下注不只为价值，也是为了不让对手
-    // 随便过牌看免费牌。实测过：不比诈唬的话主动下注率只有 29%，
-    // 而 GTO 大约是六到七成。
-    if (legal.canRaise && rng() < 0.2 + 0.35 * bluff) return raise(0.55);
+    // 随便过牌看免费牌。诈唬用和强牌一样的尺度（两极化），这样对手没法
+    // 靠尺度读牌。
+    if (legal.canRaise && rng() < 0.2 + 0.35 * bluff) return raise(plan.fraction);
     return call();
   }
 
@@ -301,7 +314,12 @@ export function decideBotAction(state, seatIdx, rng = Math.random) {
     return fold();
   }
   if (equity() > 0.8 && legal.canRaise && rng() < 0.45 + 0.45 * aggression) {
-    return raise(0.65 + 0.35 * aggression);
+    const raiseSize = raisePlan({
+      texture: boardTexture(state.board),
+      advantage: rangeAdvantage(state, seatIdx),
+      aggression,
+    });
+    return raise(raiseSize.fraction);
   }
   if (legal.canRaise && equity() > potOdds + margin + 0.2 && rng() < 0.2 + 0.45 * aggression) {
     return raise(0.6);
