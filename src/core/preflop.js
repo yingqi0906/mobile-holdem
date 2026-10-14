@@ -19,6 +19,7 @@
 
 import { rankOf, suitOf } from './cards.js';
 import { HAND_ORDER, PREFLOP_SPOTS } from './preflop-ranges.js';
+import { HAND_RANK } from './hand-rank.js';
 
 const RANK_CHAR = ['2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K', 'A'];
 const CHAR_RANK = new Map(RANK_CHAR.map((c, i) => [c, i + 2]));
@@ -142,6 +143,51 @@ export function positionOf(state, seatIdx) {
 }
 
 const cache = new Map();
+
+/**
+ * 每手牌在强弱排序里的百分位：0 = 最强（AA），1 = 最弱。
+ * 用来让性格参数知道"这手牌有多边缘"。
+ */
+const RANK_PCT = new Map();
+{
+  const order = new Map(HAND_RANK.map((h, i) => [h, i]));
+  for (const [label, idx] of order) RANK_PCT.set(label, idx / HAND_RANK.length);
+}
+
+const clamp01 = (v) => Math.max(0, Math.min(1, v));
+
+/**
+ * 把机器人性格作用到翻前范围上。
+ *
+ * 思路：紧的机器人按比例砍掉范围里**偏边缘**的部分，松的机器人除了
+ * 范围内的牌照打，还会把范围外不太烂的牌拉进来。手牌越弱受影响越大 ——
+ * 所以紧的机器人不会砍掉 AA，松的机器人也不会玩 72o。
+ *
+ * 只有 AI 走这条路径；教练的建议保持纯 GTO，不带性格。
+ */
+function applyPersonality(entry, cls, preset) {
+  const { tightness, aggression } = preset;
+  const strength = 1 - (RANK_PCT.get(cls) ?? 0.5); // 1 = 最强
+  const shift = (0.5 - tightness) * 2; // 正 = 放宽，负 = 收紧
+  const base = entry ? (entry.r + entry.c + entry.a) / 100 : 0;
+
+  // 系数刻意压得比较小：偏离 GTO 必然换来被剥削，实测性格强度拉满时
+  // "只打大牌"这个傻瓜策略能赢 40 bb/100（之前是 0）。留变化、但别留太多。
+  let total = base * Math.max(0, 1 + shift * (1 - strength) * 0.7);
+  if (total <= 0 && shift > 0) {
+    // 放宽：把范围外、且不算太烂的牌也拉进来一点
+    total = shift * Math.max(0, strength - 0.3) * 0.45;
+  }
+  total = clamp01(total);
+  if (total <= 0) return null;
+
+  // 动作构成：沿用原来的加注占比，激进型再把一部分跟注挪去加注
+  const original = entry ? entry.r + entry.c + entry.a : 0;
+  let raiseShare = original > 0 ? (entry.r + entry.a) / original : 0.75;
+  raiseShare = Math.max(0.1, Math.min(1, raiseShare + (aggression - 0.5) * 0.45));
+
+  return { r: total * raiseShare * 100, c: total * (1 - raiseShare) * 100, a: 0 };
+}
 function range(text) {
   let parsed = cache.get(text);
   if (!parsed) {
@@ -236,7 +282,7 @@ function raiseSizing(state, seatIdx, position, raises) {
 }
 
 /** 优先用 GTO 范围表。查不到就返回 null，交给下面的后备逻辑。 */
-function gtoAdvice(state, seatIdx, rng) {
+function gtoAdvice(state, seatIdx, rng, preset) {
   const seat = state.seats[seatIdx];
   if (!seat || seat.hole.length !== 2) return null;
   const key = spotKey(state, seatIdx);
@@ -244,7 +290,11 @@ function gtoAdvice(state, seatIdx, rng) {
   const table = spotData(key);
   if (!table) return null;
   const cls = handClass(seat.hole);
-  const entry = table.get(HAND_INDEX.get(cls));
+  let entry = table.get(HAND_INDEX.get(cls));
+
+  // 带性格的机器人会在这张 GTO 表的基础上偏离 —— 紧的收、松的放。
+  // 教练不传 preset，所以拿到的永远是纯 GTO 建议。
+  if (preset) entry = applyPersonality(entry, cls, preset);
 
   // 表里只收录了非弃牌的条目，所以查不到就等于"纯弃牌"。
   // 但不能弃掉能过牌的局面 —— 大盲在无人加注时是可以免费看牌的。
@@ -302,8 +352,8 @@ function gtoAdvice(state, seatIdx, rng) {
  * 翻前建议。返回结构给 AI 和教练共用 —— 两者必须是同一套逻辑，
  * 否则"教练说该加注、AI 却弃牌"这种矛盾会立刻让人失去信任。
  */
-export function preflopAdvice(state, seatIdx, rng = Math.random) {
-  const gto = gtoAdvice(state, seatIdx, rng);
+export function preflopAdvice(state, seatIdx, rng = Math.random, preset = null) {
+  const gto = gtoAdvice(state, seatIdx, rng, preset);
   if (gto) return gto;
   return fallbackAdvice(state, seatIdx, rng);
 }

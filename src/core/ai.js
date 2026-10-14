@@ -244,7 +244,9 @@ export function decideBotAction(state, seatIdx, rng = Math.random) {
   if (state.phase === PHASES.PREFLOP) {
     // 翻前完全交给范围表 —— 这里不再用"牌力评分 + 拍脑袋门槛"那一套，
     // 因为实测那套只加注 3.3%，而 GTO 大约 30%，差了一个数量级。
-    const advice = preflopAdvice(state, seatIdx, rng);
+    // 把性格传进去 —— 机器人会在 GTO 表的基础上偏离，避免整桌打法一模一样。
+    // 教练不传这个参数，所以它给玩家的建议永远是纯 GTO。
+    const advice = preflopAdvice(state, seatIdx, rng, preset);
 
     if (advice.action === 'raise' && legal.canRaise) {
       return {
