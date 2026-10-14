@@ -18,6 +18,7 @@
  */
 
 import { rankOf, suitOf } from './cards.js';
+import { HAND_ORDER, PREFLOP_SPOTS } from './preflop-ranges.js';
 
 const RANK_CHAR = ['2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K', 'A'];
 const CHAR_RANK = new Map(RANK_CHAR.map((c, i) => [c, i + 2]));
@@ -182,16 +183,138 @@ export function rangeInfo() {
 // ---------------------------------------------------------------------------
 
 /**
+ * 查表：把当前局面还原成范围表里的键，再取出这手牌的频率分布。
+ *
+ * 局面名的格式是「位置 动作」成对出现、最后跟一个决策者的位置，
+ * 例如 `hj open co call btn 3bet bb` = HJ 开注、CO 跟注、BTN 再加注，
+ * 现在轮到 BB 决定。弃牌不进序列。
+ */
+const RAISE_WORD = ['open', '3bet', '4bet', '5bet'];
+const spotCache = new Map();
+const HAND_INDEX = new Map(HAND_ORDER.map((h, i) => [h, i]));
+
+function spotData(key) {
+  if (spotCache.has(key)) return spotCache.get(key);
+  const entries = PREFLOP_SPOTS[key];
+  const parsed = entries
+    ? new Map(entries.map(([i, r, c, a]) => [i, { r, c, a }]))
+    : null;
+  spotCache.set(key, parsed);
+  return parsed;
+}
+
+export function preflopRaises(state) {
+  return (state.streetActions ?? []).filter(
+    (a) => a.kind === 'raise' || a.kind === 'allIn'
+  ).length;
+}
+
+export function spotKey(state, seatIdx) {
+  const parts = [];
+  let raises = 0;
+  for (const act of state.streetActions ?? []) {
+    const pos = positionOf(state, act.seat).toLowerCase();
+    if (act.kind === 'raise' || act.kind === 'allIn') {
+      if (raises >= RAISE_WORD.length) return null; // 超出表覆盖的深度
+      parts.push(pos, RAISE_WORD[raises]);
+      raises += 1;
+    } else if (act.kind === 'call') {
+      parts.push(pos, 'call');
+    }
+  }
+  parts.push(positionOf(state, seatIdx).toLowerCase());
+  return parts.join(' ');
+}
+
+/** 加注尺度。范围表只给了频率，没给下注额，这里按常规尺度补上。 */
+function raiseSizing(state, seatIdx, position, raises) {
+  const bb = state.config.bigBlind;
+  const inBlinds = position === 'SB' || position === 'BB';
+  if (raises === 0) return Math.round(bb * (position === 'SB' ? 3 : 2.5));
+  if (raises === 1) return Math.round(state.currentBet * (inBlinds ? 4 : 3));
+  return Math.round(state.currentBet * 2.3);
+}
+
+/** 优先用 GTO 范围表。查不到就返回 null，交给下面的后备逻辑。 */
+function gtoAdvice(state, seatIdx, rng) {
+  const seat = state.seats[seatIdx];
+  if (!seat || seat.hole.length !== 2) return null;
+  const key = spotKey(state, seatIdx);
+  if (!key) return null;
+  const table = spotData(key);
+  if (!table) return null;
+  const cls = handClass(seat.hole);
+  const entry = table.get(HAND_INDEX.get(cls));
+
+  // 表里只收录了非弃牌的条目，所以查不到就等于"纯弃牌"。
+  // 但不能弃掉能过牌的局面 —— 大盲在无人加注时是可以免费看牌的。
+  if (!entry) {
+    if (state.currentBet <= seat.streetBet) {
+      return {
+        cls,
+        position: positionOf(state, seatIdx),
+        spot: key,
+        mix: [0, 0, 0],
+        source: 'gto',
+        action: 'check',
+        label: 'GTO 范围表',
+        note: `${cls} 在「${key}」局面下不在加注范围里，过牌看牌。`,
+      };
+    }
+    return {
+      cls,
+      position: positionOf(state, seatIdx),
+      spot: key,
+      mix: [0, 0, 0],
+      source: 'gto',
+      action: 'fold',
+      label: 'GTO 范围表',
+      note: `${cls} 在「${key}」局面下是纯弃牌，没有可玩的频率。`,
+    };
+  }
+
+  const { r, c, a } = entry;
+  const position = positionOf(state, seatIdx);
+  const raises = preflopRaises(state);
+  const mix = `加注 ${r}%／跟注 ${c}%／全下 ${a}%／弃牌 ${100 - r - c - a}%`;
+  const base = { cls, position, spot: key, mix: [r, c, a], source: 'gto' };
+  const roll = rng() * 100;
+
+  if (roll < r) {
+    return {
+      ...base,
+      action: 'raise',
+      sizing: raiseSizing(state, seatIdx, position, raises),
+      label: 'GTO 范围表',
+      note: `${cls} 在「${key}」局面下：${mix}。这次执行加注。`,
+    };
+  }
+  if (roll < r + c) {
+    return { ...base, action: 'call', label: 'GTO 范围表', note: `${cls} 在「${key}」局面下：${mix}。这次执行跟注。` };
+  }
+  if (roll < r + c + a) {
+    return { ...base, action: 'allin', label: 'GTO 范围表', note: `${cls} 在「${key}」局面下：${mix}。这次执行全下。` };
+  }
+  return { ...base, action: 'fold', label: 'GTO 范围表', note: `${cls} 在「${key}」局面下：${mix}。这次弃牌。` };
+}
+
+/**
  * 翻前建议。返回结构给 AI 和教练共用 —— 两者必须是同一套逻辑，
  * 否则"教练说该加注、AI 却弃牌"这种矛盾会立刻让人失去信任。
  */
 export function preflopAdvice(state, seatIdx, rng = Math.random) {
+  const gto = gtoAdvice(state, seatIdx, rng);
+  if (gto) return gto;
+  return fallbackAdvice(state, seatIdx, rng);
+}
+
+/** 范围表覆盖不到的局面（比如溜入后被加注）用这套简化逻辑兜底。 */
+function fallbackAdvice(state, seatIdx, rng) {
   const seat = state.seats[seatIdx];
   const cls = handClass(seat.hole);
   const position = positionOf(state, seatIdx);
   const bb = state.config.bigBlind;
-  const toCall = state.currentBet - seat.streetBet;
-  const raises = state.raiseCount ?? 0;
+  const raises = preflopRaises(state);
 
   // 还没人加注：按位置的开局范围打
   if (state.currentBet <= bb) {

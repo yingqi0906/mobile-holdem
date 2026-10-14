@@ -10,6 +10,7 @@
 
 import { freshDeck, rankOf, suitOf } from './cards.js';
 import { evaluateBest } from './evaluator.js';
+import { estimateEquityVsRanges, opponentRangeWidths } from './equity.js';
 import { ACTION_TYPES, PHASES, getLegalActions, totalPot } from './engine.js';
 import { preflopAdvice } from './preflop.js';
 import { createSeededRng } from './rng.js';
@@ -168,7 +169,10 @@ export function decideBotAction(state, seatIdx, rng = Math.random) {
   const equity = () => {
     if (equityCache === null) {
       const iterations = iterationsFor(state.phase, opponents);
-      const sample = estimateEquity(seat.hole, state.board, opponents, iterations, rng);
+      // 对抗「范围」而不是对抗随机牌 —— 对手加注时他的牌远强于随机牌，
+      // 用随机牌算胜率会系统性高估，表现出来就是跟注过多。
+      const widths = opponentRangeWidths(state, seatIdx);
+      const sample = estimateEquityVsRanges(seat.hole, state.board, widths, iterations, rng);
       equityCache = clamp(sample + (rng() - 0.5) * 0.04, 0, 1);
     }
     return equityCache;
@@ -201,6 +205,10 @@ export function decideBotAction(state, seatIdx, rng = Math.random) {
         amount: clamp(advice.sizing ?? state.config.bigBlind * 3, legal.minRaiseTo, legal.maxRaiseTo),
       };
     }
+    // 范围表会给出「全下」这个频率 —— 别漏掉，否则会被当成弃牌
+    if (advice.action === 'allin' && legal.canRaise) {
+      return { type: ACTION_TYPES.ALL_IN, seat: seatIdx };
+    }
     if (advice.action === 'call' && legal.canCall) {
       return { type: ACTION_TYPES.CALL, seat: seatIdx };
     }
@@ -211,17 +219,21 @@ export function decideBotAction(state, seatIdx, rng = Math.random) {
 
   // ------------------------------------------------------------ 翻牌后
   if (legal.canCheck) {
-    const strong = equity() > 0.68 + 0.08 * tightness;
-    const decent = equity() > 0.52 + 0.06 * tightness;
+    const eq = equity();
+    const strong = eq > 0.68 + 0.08 * tightness;
+    const decent = eq > 0.5;
 
     if (strong && legal.canRaise) {
       if (rng() < 0.2) return call(); // 偶尔慢打，别让"加注=大牌"太好读
       return raise(0.55 + 0.3 * aggression);
     }
-    if (decent && legal.canRaise && rng() < 0.45 + 0.4 * aggression) {
+    if (decent && legal.canRaise && rng() < 0.5 + 0.35 * aggression) {
       return raise(0.45 + 0.2 * aggression);
     }
-    if (legal.canRaise && rng() < bluff * 0.3) return raise(0.5);
+    // 牌力不足时也要以一定频率下注 —— 下注不只为价值，也是为了不让对手
+    // 随便过牌看免费牌。实测过：不比诈唬的话主动下注率只有 29%，
+    // 而 GTO 大约是六到七成。
+    if (legal.canRaise && rng() < 0.2 + 0.35 * bluff) return raise(0.55);
     return call();
   }
 

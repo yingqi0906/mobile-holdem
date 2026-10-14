@@ -16,6 +16,7 @@
 
 import { ACTION_TYPES, PHASES, getLegalActions, totalPot } from './engine.js';
 import { estimateEquity } from './ai.js';
+import { estimateEquityVsRanges, opponentRangeWidths } from './equity.js';
 import { handClass, preflopAdvice } from './preflop.js';
 
 const ACTION_LABEL = {
@@ -56,6 +57,8 @@ export function advise(state, seatIdx, rng = Math.random) {
     const action =
       advice.action === 'raise'
         ? ACTION_TYPES.RAISE
+        : advice.action === 'allin'
+          ? ACTION_TYPES.ALL_IN
         : advice.action === 'call'
           ? ACTION_TYPES.CALL
           : advice.action === 'check'
@@ -79,7 +82,13 @@ export function advise(state, seatIdx, rng = Math.random) {
   const opponents = state.seats.filter(
     (s) => s.inHand && !s.folded && s.index !== seatIdx
   ).length;
-  const equity = estimateEquity(seat.hole, state.board, opponents, 420, rng);
+  const equity = estimateEquityVsRanges(
+    seat.hole,
+    state.board,
+    opponentRangeWidths(state, seatIdx),
+    420,
+    rng
+  );
   const ev = callEV(equity, pot, toCall);
   const base = { street: '翻后', equity, pot, toCall, potOdds, handClass: cls };
   const reasons = [`估算胜率 ${pct(equity)}（对抗 ${opponents} 个对手，模拟 420 次）`];

@@ -61,11 +61,20 @@ test('翻前建议：AA 任何位置都加注，72o 直接弃', () => {
 });
 
 test('翻前建议：同一手牌在庄家位能玩，在枪口位弃掉', () => {
-  // K9s 在按钮位范围内，但不在枪口位范围内
-  const utg = preflopState('Ks 9s', 3);
-  const btn = preflopState('Ks 9s', 0);
+  // Q8s 在按钮位的开局范围里，但枪口位要弃掉
+  const utg = preflopState('Qs 8s', 3);
+  const btn = preflopState('Qs 8s', 0);
   assert.equal(preflopAdvice(utg, 3, seeded()).action, 'fold');
   assert.equal(preflopAdvice(btn, 0, seeded()).action, 'raise');
+});
+
+test('翻前走的是范围表，会带上局面名和频率分布', () => {
+  const state = preflopState('As Ah', 3);
+  const advice = preflopAdvice(state, 3, seeded());
+  assert.equal(advice.source, 'gto', '应该命中 GTO 范围表');
+  assert.equal(advice.spot, 'utg');
+  assert.ok(advice.mix[0] >= 99, `AA 在枪口位应该必加注，实际 ${advice.mix.join('/')}`);
+  assert.equal(advice.action, 'raise');
 });
 
 test('教练给出的建议和 AI 用的是同一套翻前逻辑', () => {

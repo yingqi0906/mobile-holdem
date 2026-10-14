@@ -44,6 +44,24 @@ scored.sort((x, y) => y.equity - x.equity);
 
 console.log(`共 ${scored.length} 种\n`);
 console.log(scored.map((c) => c.label).join(' '));
+
+// 同时写成模块，供翻后的"对抗范围"计算使用
+{
+  const { writeFileSync } = await import('node:fs');
+  const body =
+    '/**\n' +
+    ' * 自动生成，请勿手改。生成脚本：tools/rank-hands.mjs\n' +
+    ' *\n' +
+    ' * 169 种起手牌按「对抗一个随机手牌的胜率」从强到弱排序。\n' +
+    ' * 翻后估算胜率时，用它把对手的手牌限制在合理的范围里 ——\n' +
+    ' * 对手主动加注的时候，他不可能拿着任意两张牌。\n' +
+    ' */\n\n' +
+    'export const HAND_RANK = ' +
+    JSON.stringify(scored.map((c) => c.label)) +
+    ';\n';
+  writeFileSync('src/core/hand-rank.js', body);
+  console.log(`\n已写入 src/core/hand-rank.js（${Math.round(body.length / 1024)} KB）`);
+}
 console.log('\n前 20 名：');
 for (const c of scored.slice(0, 20)) {
   console.log(`  ${c.label.padEnd(4)} ${(c.equity * 100).toFixed(1)}%`);

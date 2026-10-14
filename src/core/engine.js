@@ -116,6 +116,8 @@ export function createTable(options = {}) {
     minRaise: config.bigBlind,
     /** 这一条街已经被加注了几次。翻前策略要靠它区分"面对加注"和"面对再加注"。 */
     raiseCount: 0,
+    /** 这一条街的行动顺序（谁做了什么）。翻前策略靠它还原局面去查范围表。 */
+    streetActions: [],
     pendingActors: [],
     cannotRaise: [],
     toAct: null,
@@ -248,6 +250,7 @@ export function startHand(prev, rng = defaultRng()) {
   state.currentBet = 0;
   state.minRaise = state.config.bigBlind;
   state.raiseCount = 0;
+  state.streetActions = [];
   state.cannotRaise = [];
   state.lastAggressor = null;
   state.phase = PHASES.PREFLOP;
@@ -359,6 +362,8 @@ function endStreet(state) {
   }
   state.currentBet = 0;
   state.minRaise = state.config.bigBlind;
+  state.raiseCount = 0;
+  state.streetActions = [];
   state.cannotRaise = [];
   state.lastAggressor = null;
   computePots(state);
@@ -583,6 +588,10 @@ function recordAction(state, seat, label, amount, kind) {
     kind,
     seq: state.actionSeq,
   };
+  // 记下这一条街的完整行动顺序，翻前策略要靠它还原局面
+  if (Array.isArray(state.streetActions)) {
+    state.streetActions.push({ seat: seat.index, kind });
+  }
   state.events.push({ type: 'action', seat: seat.index, action: label, amount });
   state.log.push({ hand: state.handNumber, text: `${seat.name} ${amount !== undefined ? `${label} ${amount}` : label}` });
 }

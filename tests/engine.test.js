@@ -271,7 +271,9 @@ test('随机对抗：多张桌子轮流打到散场，筹码始终守恒', () =>
   }
 
   assert.ok(hands >= 800, `应该跑完足够多手牌，实际只有 ${hands}`);
-  assert.ok(showdowns > 50, `应该有相当比例的牌打到亮牌，实际 ${showdowns}`);
+  // 阈值放宽过：换成 GTO 翻前范围表之后机器人紧了很多，
+  // 大部分牌局在翻前就结束了，摊牌比例自然下降
+  assert.ok(showdowns > 15, `应该有牌打到亮牌，实际 ${showdowns}`);
 });
 
 // startHand 在 engine.js 里，这里包一层只为让上面的辅助函数读起来顺一点。
