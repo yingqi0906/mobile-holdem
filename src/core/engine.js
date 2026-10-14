@@ -114,6 +114,8 @@ export function createTable(options = {}) {
     pots: [],
     currentBet: 0,
     minRaise: config.bigBlind,
+    /** 这一条街已经被加注了几次。翻前策略要靠它区分"面对加注"和"面对再加注"。 */
+    raiseCount: 0,
     pendingActors: [],
     cannotRaise: [],
     toAct: null,
@@ -245,6 +247,7 @@ export function startHand(prev, rng = defaultRng()) {
   state.pots = [];
   state.currentBet = 0;
   state.minRaise = state.config.bigBlind;
+  state.raiseCount = 0;
   state.cannotRaise = [];
   state.lastAggressor = null;
   state.phase = PHASES.PREFLOP;
@@ -607,6 +610,7 @@ function applyRaise(state, seatIdx, targetTotal) {
   seat.hasActed = true;
   state.currentBet = seat.streetBet;
   state.lastAggressor = seatIdx;
+  state.raiseCount = (state.raiseCount ?? 0) + 1;
 
   if (isFullRaise) {
     state.minRaise = increment;

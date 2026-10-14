@@ -150,6 +150,7 @@ const MEASURE = `(() => {
     ['hudNet', '#btn-chips'], ['chipPanel', '#chippanel'],
     ['chipStats', '.chip-stats'], ['chipChart', '.chip-chart'],
     ['seatFlash', '.seat-flash'], ['betChip', '.bet-chip'],
+    ['coachAdvice', '.coach-advice'], ['coachReview', '.coach-review'],
   ]) {
     const el = document.querySelector(sel);
     if (el) out.nodes[name] = rect(el);
@@ -307,6 +308,23 @@ const SCRIPT_ACTION = `(() => {
   return d.botAct() ? 'ok' : 'no-action';
 })()`;
 
+// 一直让机器人走到玩家行动，停下等玩家决策 —— 这时教练提示应该出现
+const SCRIPT_COACH = `(() => {
+  const d = window.__holdem;
+  if (!d) return 'no-debug-hook';
+  d.stop();
+  for (let h = 0; h < 8; h++) {
+    d.newHand();
+    let n = 0;
+    while (d.getState().toAct !== 0 && n++ < 60) {
+      if (!d.botAct()) break;
+    }
+    d.stop();
+    if (d.getState().toAct === 0) return 'ok';
+  }
+  return 'no-action';
+})()`;
+
 // 让玩家自动跟注，这样牌局能一直跑下去，用来实测节奏
 const SCRIPT_AUTOPLAY = `(() => {
   const d = window.__holdem;
@@ -365,6 +383,10 @@ async function main() {
     const note = await cdp.eval(SCRIPT_ACTION);
     if (note !== 'ok') console.error('提示：', note);
     await sleep(120);
+  } else if (scenario === 'coach') {
+    const note = await cdp.eval(SCRIPT_COACH);
+    if (note !== 'ok') console.error('提示：', note);
+    await sleep(300);
   } else if (scenario === 'pace') {
     // 让玩家自动跟注，这样牌局能连续跑，才好量真实节奏
     const started = await cdp.eval(SCRIPT_AUTOPLAY);

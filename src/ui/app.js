@@ -17,11 +17,12 @@ import {
 } from '../core/engine.js';
 import { attachBots, decideBotAction } from '../core/ai.js';
 import { cardToLabel, isRed } from '../core/cards.js';
+import { advise, reviewDecision } from '../core/coach.js';
 import { bestFive } from '../core/evaluator.js';
 import { createCryptoRng } from '../core/rng.js';
 
 /** 每次发布时改一下这个号，界面上能看到，方便确认自己加载的是哪一版。 */
-const BUILD = 'v0.11';
+const BUILD = 'v0.12';
 
 const CONFIG = {
   smallBlind: 1,
@@ -60,6 +61,7 @@ const els = {
   btnLog: document.getElementById('btn-log'),
   btnNew: document.getElementById('btn-new'),
   btnChips: document.getElementById('btn-chips'),
+  btnCoach: document.getElementById('btn-coach'),
   net: document.getElementById('hud-net'),
   logBuild: document.getElementById('log-build'),
   chipBuild: document.getElementById('chip-build'),
@@ -90,6 +92,16 @@ let renderedPhase = null;
 let betPanel = { open: false, value: 0 };
 let toastTimer = null;
 const seatEls = [];
+
+/**
+ * 教练状态。
+ *
+ * advice 是"轮到玩家时算出的最佳行动"，key 用来判断是否已经算过 ——
+ * 每次玩家行动前都要重新算，因为局面变了。
+ * review 是玩家行动之后的复盘结果。
+ */
+const coach = { enabled: true, key: null, advice: null, review: null, expanded: false };
+let reviewTimer = null;
 
 /** 每个座位一条线，自己那条用金色。数据来自引擎的 session 账本。 */
 const SEAT_COLORS = ['#f2c53d', '#7ce0a7', '#6db3f2', '#f19a92', '#c79af2', '#f2a65a'];
@@ -543,9 +555,21 @@ function buildBetPanel(legal) {
 
 function renderActionBar() {
   els.actionbar.innerHTML = '';
-  // 加注面板展开时操作栏会长高、牌桌被压矮，这时把自己的座位往上收一点，
+
+  const hero = humanSeat(state);
+  const legal = getLegalActions(state, hero.index);
+  const myTurn = !isHandOver() && state.toAct === hero.index && Boolean(legal);
+  const showAdvice = Boolean(myTurn && coach.enabled && coach.advice);
+
+  // 操作栏变高时牌桌会被压矮，把自己的座位往上收一点，
   // 免得筹码名牌被面板盖住。
-  els.tableArea.classList.toggle('compact', betPanel.open);
+  els.tableArea.classList.toggle(
+    'compact',
+    betPanel.open || Boolean(coach.review) || showAdvice
+  );
+
+  // 复盘卡片放在最上面：它是对刚刚那一步的反馈，比什么都重要
+  if (coach.review) els.actionbar.appendChild(buildReviewCard(coach.review));
 
   if (isHandOver()) {
     const row = el('div', 'btn-row');
@@ -557,10 +581,6 @@ function renderActionBar() {
     return;
   }
 
-  const hero = humanSeat(state);
-  const legal = getLegalActions(state, hero.index);
-  const myTurn = state.toAct === hero.index && legal;
-
   if (!myTurn) {
     const waiting = state.seats[state.toAct];
     els.actionbar.appendChild(
@@ -569,6 +589,7 @@ function renderActionBar() {
     return;
   }
 
+  if (showAdvice) els.actionbar.appendChild(buildAdviceStrip(coach.advice));
   if (betPanel.open) els.actionbar.appendChild(buildBetPanel(legal));
 
   const row = el('div', 'btn-row');
@@ -822,6 +843,66 @@ function pulse(node, className) {
   node.classList.add(className);
 }
 
+/** 轮到玩家时算一次建议。同一个局面只算一次，否则每帧都要跑蒙特卡洛。 */
+function updateCoach() {
+  if (!coach.enabled || isHandOver()) return;
+  const hero = humanSeat(state);
+  if (state.toAct !== hero.index) return;
+  const key = `${state.handNumber}:${state.actionSeq ?? 0}`;
+  if (coach.key === key) return;
+  coach.key = key;
+  coach.expanded = false;
+  coach.advice = advise(state, hero.index, rng);
+}
+
+/** 把建议翻译成一句话。 */
+function adviceText(a) {
+  if (!a) return '';
+  if (a.action === ACTION_TYPES.FOLD) return '弃牌';
+  if (a.action === ACTION_TYPES.CHECK) return '过牌';
+  if (a.action === ACTION_TYPES.CALL) return `跟注 ${a.toCall ?? ''}`.trim();
+  if (a.amount) return `加注到 ${a.amount}`;
+  if (a.fraction) return `下注约 ${Math.round(a.fraction * 100)}% 底池`;
+  return '加注';
+}
+
+function buildAdviceStrip(advice) {
+  const box = el('div', 'coach-advice');
+  const head = el('div', 'coach-head');
+  head.appendChild(el('span', 'coach-tag', '建议'));
+  head.appendChild(el('span', 'coach-action', adviceText(advice)));
+
+  const why = el('button', 'coach-why', coach.expanded ? '收起解析' : '为什么');
+  why.type = 'button';
+  why.addEventListener('click', () => {
+    coach.expanded = !coach.expanded;
+    renderActionBar();
+  });
+  head.appendChild(why);
+  box.appendChild(head);
+
+  if (coach.expanded) {
+    const list = el('ul', 'coach-reasons');
+    for (const reason of advice.reasons ?? []) list.appendChild(el('li', '', reason));
+    box.appendChild(list);
+  }
+  return box;
+}
+
+function buildReviewCard(review) {
+  const box = el('div', `coach-review ${review.grade}`);
+  box.appendChild(el('div', 'coach-review-title', review.title));
+  box.appendChild(el('div', 'coach-review-detail', review.detail));
+  const close = el('button', 'coach-close', '×');
+  close.type = 'button';
+  close.addEventListener('click', () => {
+    coach.review = null;
+    renderActionBar();
+  });
+  box.appendChild(close);
+  return box;
+}
+
 /**
  * 座位周围扩散一圈彩色光环，标明这个座位刚刚做了什么。
  * 单机版里机器人一个接一个行动，没有这个的话动作就是一闪而过。
@@ -878,6 +959,7 @@ function render() {
     }
   }
 
+  updateCoach();
   renderHud();
   renderBoard();
   renderSeats();
@@ -938,6 +1020,9 @@ function humanAct(type, amount) {
   const hero = humanSeat(state);
   if (state.toAct !== hero.index) return;
   const before = state.phase;
+  // 复盘必须在 applyAction 之前做 —— 之后局面就变了，算不出当时的选择对不对
+  const adviceForReview = coach.enabled ? coach.advice : null;
+  const stateBefore = state;
   try {
     state = applyAction(state, { seat: hero.index, type, amount }, rng);
   } catch (err) {
@@ -946,6 +1031,16 @@ function humanAct(type, amount) {
     render();
     return;
   }
+
+  if (adviceForReview) {
+    coach.review = reviewDecision(stateBefore, hero.index, { type, amount }, adviceForReview);
+    clearTimeout(reviewTimer);
+    reviewTimer = setTimeout(() => {
+      coach.review = null;
+      renderActionBar();
+    }, 9000);
+  }
+
   render();
   if (!isHandOver()) scheduleBots((state.phase !== before ? 520 : 0) + botDelay());
 }
@@ -953,9 +1048,13 @@ function humanAct(type, amount) {
 function newHand() {
   clearTimeout(botTimer);
   clearTimeout(resultTimer);
+  clearTimeout(reviewTimer);
   hideOverlay();
   betPanel.open = false;
   renderedPhase = null;
+  coach.review = null;
+  coach.advice = null;
+  coach.key = null;
 
   state = startHand(state, rng);
 
@@ -1000,6 +1099,15 @@ function bind() {
     renderLog();
   });
   els.logClose.addEventListener('click', () => els.logpanel.classList.add('hidden'));
+  els.btnCoach.addEventListener('click', () => {
+    coach.enabled = !coach.enabled;
+    coach.advice = null;
+    coach.review = null;
+    coach.key = null;
+    els.btnCoach.classList.toggle('coach-on', coach.enabled);
+    els.btnCoach.textContent = coach.enabled ? '教练' : '教练关';
+    render();
+  });
   els.btnChips.addEventListener('click', () => {
     els.chippanel.classList.remove('hidden');
     renderChipPanel();

@@ -11,6 +11,7 @@
 import { freshDeck, rankOf, suitOf } from './cards.js';
 import { evaluateBest } from './evaluator.js';
 import { ACTION_TYPES, PHASES, getLegalActions, totalPot } from './engine.js';
+import { preflopAdvice } from './preflop.js';
 import { createSeededRng } from './rng.js';
 
 export const BOT_PRESETS = {
@@ -175,7 +176,6 @@ export function decideBotAction(state, seatIdx, rng = Math.random) {
 
   const pot = totalPot(state);
   const potOdds = legal.toCall > 0 ? legal.toCall / (pot + legal.toCall) : 0;
-  const bb = state.config.bigBlind;
 
   const raise = (fraction) => ({
     type: ACTION_TYPES.RAISE,
@@ -190,31 +190,23 @@ export function decideBotAction(state, seatIdx, rng = Math.random) {
 
   // ------------------------------------------------------------ 翻牌前
   if (state.phase === PHASES.PREFLOP) {
-    const score = chenScore(seat.hole);
-    const toCallBB = legal.toCall / bb;
-    // 要跟的大盲越多，门槛越高
-    const sizeFactor = Math.min(1, toCallBB / 6);
-    const callBar = 2.5 + 4 * tightness + sizeFactor * (3 + 3 * tightness);
-    const raiseBar = callBar + 3;
+    // 翻前完全交给范围表 —— 这里不再用"牌力评分 + 拍脑袋门槛"那一套，
+    // 因为实测那套只加注 3.3%，而 GTO 大约 30%，差了一个数量级。
+    const advice = preflopAdvice(state, seatIdx, rng);
 
-    if (legal.canCheck) {
-      if (legal.canRaise && score >= raiseBar && rng() < 0.55 + 0.4 * aggression) {
-        return raise(0.7);
-      }
-      if (legal.canRaise && score >= 6 && rng() < 0.2 + 0.4 * aggression) {
-        return raise(0.5);
-      }
-      return call();
+    if (advice.action === 'raise' && legal.canRaise) {
+      return {
+        type: ACTION_TYPES.RAISE,
+        seat: seatIdx,
+        amount: clamp(advice.sizing ?? state.config.bigBlind * 3, legal.minRaiseTo, legal.maxRaiseTo),
+      };
     }
-
-    if (score < callBar) {
-      if (legal.canRaise && rng() < bluff * 0.08) return raise(0.7);
-      return fold();
+    if (advice.action === 'call' && legal.canCall) {
+      return { type: ACTION_TYPES.CALL, seat: seatIdx };
     }
-    if (legal.canRaise && score >= raiseBar && rng() < 0.4 + 0.45 * aggression) {
-      return raise(0.75);
-    }
-    return call();
+    if (legal.canCheck) return { type: ACTION_TYPES.CHECK, seat: seatIdx };
+    if (advice.action === 'call') return { type: ACTION_TYPES.CALL, seat: seatIdx };
+    return { type: ACTION_TYPES.FOLD, seat: seatIdx };
   }
 
   // ------------------------------------------------------------ 翻牌后
