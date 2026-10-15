@@ -22,6 +22,7 @@ import {
   raisePlan,
   rangeAdvantage,
 } from './postflop.js';
+import { effectiveStack, streetPlan, turnBarrelFactor } from './plan.js';
 import { createSeededRng } from './rng.js';
 
 export const BOT_PRESETS = {
@@ -247,6 +248,8 @@ export function decideBotAction(state, seatIdx, rng = Math.random) {
   // 实验开关：HOLDEM_NO_ADAPT=1 关掉针对玩家的调整，用来做 A/B 对照。
   const adaptOff = typeof process !== 'undefined' && process.env?.HOLDEM_NO_ADAPT === '1';
   const adapt = adaptOff ? { bluff: 1, value: 1, callDown: 1, note: null } : readOpponent(state, seatIdx);
+  // 实验开关：HOLDEM_NO_PLAN=1 关掉两街计划，回到只看当前一注的老做法。
+  const planEnabled = !(typeof process !== 'undefined' && process.env?.HOLDEM_NO_PLAN === '1');
   const call = () => ({
     type: legal.canCheck ? ACTION_TYPES.CHECK : ACTION_TYPES.CALL,
     seat: seatIdx,
@@ -305,13 +308,28 @@ export function decideBotAction(state, seatIdx, rng = Math.random) {
     // A/B 开关：HOLDEM_FLAT_SIZING=1 恢复改动前的固定尺度，
     // 用来量化"按牌面选尺度"到底有没有让 AI 变强。浏览器里没有 process。
     const flat = typeof process !== 'undefined' && process.env?.HOLDEM_FLAT_SIZING === '1';
-    const valueSize = flat ? 0.55 + 0.3 * aggression : plan.fraction;
-    const thinSize = flat ? 0.45 + 0.2 * aggression : plan.fraction * 0.8;
+    // 两街计划：把还剩几条街、筹码还剩多少也算进尺度里。
+    // 打算打到河牌的牌，每条街用等比尺度把底池一级级垫上去，
+    // 免得连下三注小注、河牌才发现大半筹码还留在手里。
+    const planning =
+      planEnabled && !flat
+        ? streetPlan({
+            street: state.phase,
+            pot,
+            stack: effectiveStack(state, seatIdx),
+            textureFraction: plan.fraction,
+          })
+        : null;
+    const plannedSize = planning ? planning.fraction : plan.fraction;
+    const valueSize = flat ? 0.55 + 0.3 * aggression : plannedSize;
+    const thinSize = flat ? 0.45 + 0.2 * aggression : plannedSize * 0.8;
     const strong = eq > 0.68 + 0.08 * tightness;
     const decent = eq > 0.5;
 
     if (strong && legal.canRaise) {
       if (rng() < 0.2) return call(); // 偶尔慢打，别让"加注=大牌"太好读
+      // 筹码/底池已经很低：没有下一注的玩法了，直接打光。
+      if (planning?.commit) return { type: ACTION_TYPES.ALL_IN, seat: seatIdx };
       return raise(valueSize);
     }
     // 频率沿用原来那套（实测合格的），只把**尺度**换成按牌面算出来的。
@@ -326,8 +344,15 @@ export function decideBotAction(state, seatIdx, rng = Math.random) {
     // 诊断开关：HOLDEM_FLAT_BLUFF=1 时诈唬固定用半池（改动前的做法），
     // 用来验证"两极化尺度把诈唬挪出了中等档"这个机制。浏览器里没有 process。
     const flatBluff = typeof process !== 'undefined' && process.env?.HOLDEM_FLAT_BLUFF === '1';
-    if (legal.canRaise && rng() < (0.2 + 0.35 * bluff) * adapt.bluff) {
-      return raise(flat || flatBluff ? 0.55 : plan.fraction);
+    // 转牌的诈唬要挑牌：转牌做成了同花/顺子，对手的跟注范围立刻变强，
+    // 这时继续开火是送钱，降低频率把这一街让掉。
+    const barrel =
+      planEnabled && state.phase === PHASES.TURN
+        ? turnBarrelFactor(state.board.slice(0, 3), state.board)
+        : null;
+    const bluffFrequency = (0.2 + 0.35 * bluff) * adapt.bluff * (barrel ? barrel.factor : 1);
+    if (legal.canRaise && rng() < bluffFrequency) {
+      return raise(flat || flatBluff ? 0.55 : plannedSize);
     }
     return call();
   }
