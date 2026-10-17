@@ -83,9 +83,34 @@ for (const [name, grid] of Object.entries(raw)) {
  * 所以这里做一道硬校验：AA 和 KK 必须总是继续（加注+跟注+全下 ≥ 95%）。
  * 不合格的局面直接丢弃，运行时回落到项目自带的范围表。
  */
+/**
+ * 数据校验。
+ *
+ * 老规则是 "AA/KK 必须继续（>=95%）"，用来抓 OCR 错误；但它会误伤
+ * **冷跟节点** —— 行动者是冷跟者时，他的范围里本来就没有 AA/KK
+ * （这些牌翻前会 3bet，不会平跟），所以 "AA = 弃牌" 是对的。
+ * 55 个挤压节点当年就是这么被误删的。
+ *
+ * 现在只对非冷跟节点保留这道校验。冷跟节点的继续范围允许为空：
+ * 截图面板上 4bet 子树的弃牌率就是 99.8%。
+ */
+function isColdCallNode(key) {
+  const tokens = key.split(' ');
+  const callAt = tokens.indexOf('call');
+  if (callAt < 1 || callAt + 2 >= tokens.length) return false;
+  const caller = tokens[callAt - 1];
+  const actor = tokens[tokens.length - 1];
+  return actor === caller;
+}
+
 let dropped = 0;
 const droppedNames = [];
+let coldCallSkipped = 0;
 for (const [key, entries] of Object.entries(spots)) {
+  if (isColdCallNode(key)) {
+    coldCallSkipped += 1;
+    continue;
+  }
   const byHand = new Map(entries.map((e) => [e[0], e]));
   const continues = (hand) => {
     const e = byHand.get(INDEX.get(hand));
@@ -115,6 +140,6 @@ const body =
 
 writeFileSync('src/core/preflop-ranges.js', body);
 console.log(`局面数 ${Object.keys(spots).length}，收录条目 ${kept}，空局面 ${skipped}`);
-console.log(`校验剔除 ${dropped} 个局面${dropped ? '（例如 ' + droppedNames.join(' | ') + '）' : ''}`);
+console.log(`校验剔除 ${dropped} 个局面${dropped ? '（例如 ' + droppedNames.join(' | ') + '）' : ''}；冷跟节点免检 ${coldCallSkipped} 个`);
 console.log(`输出大小 ${Math.round(body.length / 1024)} KB`);
 console.log(`示例 utg:`, JSON.stringify(spots.utg?.slice(0, 3)));
